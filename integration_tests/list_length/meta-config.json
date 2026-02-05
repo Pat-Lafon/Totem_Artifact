@@ -1,0 +1,29 @@
+{
+    "mode": "debug",
+    "max_printing_size": 300,
+    "debug_tags": [
+        "preprocess",
+        "typing",
+        "result"
+    ],
+    "logfile": ".log",
+    "resfile": ".result",
+    "abdfile": ".abd",
+    "synfile": ".syn",
+    "collectfile": ".collect",
+    "comp_path": "components.txt",
+    "abd_templates": ["template_emp", "template_eq_0"],
+    "num_quantifier": 0,
+    "synth_bound": 3,
+    "synth_rlimit": 10000,
+    "synth_timeout": 999,
+    "abduce_rlimit": 10000,
+    "type_rlimit": 10000,
+    "prim_path": {
+        "data_type_decls": "../../integration_tests/list_length/data_type_decls.ml",
+        "templates": "../../integration_tests/list_length/templates.ml",
+        "normal_typing": "../../integration_tests/list_length/normal_typing.ml",
+        "axioms": "../../integration_tests/list_length/program.axioms.ml",
+        "coverage_typing": "../../integration_tests/list_length/coverage_typing.ml"
+    }
+}
