@@ -1,0 +1,6 @@
+Nil
+Cons
+int_gen
+is_nil
+<=
+subs

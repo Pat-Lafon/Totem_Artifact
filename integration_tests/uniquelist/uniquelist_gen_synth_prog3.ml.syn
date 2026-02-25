@@ -1,0 +1,25 @@
+let rec unique_list_gen = fun (s : int) ->
+  (let ((xccc6 : bool)) =
+     ((sizecheck : int -> bool) ((s : int) : int) : bool) in
+   (match ((xccc6 : bool) : bool) with
+    | true -> ([] : ilist)
+    | false ->
+        (let ((xccc7 : int)) = ((subs : int -> int) ((s : int) : int) : int) in
+         (let ((l : ilist)) =
+            ((unique_list_gen : int -> ilist) ((xccc7 : int) : int) : 
+            ilist) in
+          (let ((x : int)) = ((int_gen : unit -> int) (() : unit) : int) in
+           (let ((xccc8 : int -> bool)) =
+              ((list_mem : ilist -> int -> bool) ((l : ilist) : ilist) : 
+              int -> bool) in
+            (let ((xccc9 : bool)) =
+               ((xccc8 : int -> bool) ((x : int) : int) : bool) in
+             ((match ((xccc9 : bool) : bool) with
+               | true -> (Err : ilist)
+               | false ->
+                   (let ((idx7 : ilist)) = ((l : ilist) : ilist) in
+                    (let ((idx8 : int)) = ((x : int) : int) in
+                     (((idx8 : int) : int) ::
+                       ((idx7 : ilist) : ilist) : ilist) : ilist) : ilist)) : 
+               ilist) : ilist) : ilist) : ilist) : ilist) : ilist) : 
+     ilist) : ilist)

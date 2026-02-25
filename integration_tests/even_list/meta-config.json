@@ -12,7 +12,10 @@
     "synfile": ".syn",
     "collectfile": ".collect",
     "comp_path": "components.txt",
-    "abd_templates": ["template_emp", "template_eq_0"],
+    "abd_templates": [
+        "template_singleton",
+        "template_eq_0"
+    ],
     "num_quantifier": 0,
     "synth_bound": 3,
     "synth_rlimit": 10000,
@@ -20,10 +23,10 @@
     "abduce_rlimit": 10000,
     "type_rlimit": 10000,
     "prim_path": {
-        "data_type_decls": "../../integration_tests/list_length/data_type_decls.ml",
-        "templates": "../../integration_tests/list_length/templates.ml",
-        "normal_typing": "../../integration_tests/list_length/normal_typing.ml",
-        "axioms": "../../integration_tests/list_length/program_axioms.ml",
-        "coverage_typing": "../../integration_tests/list_length/coverage_typing.ml"
+        "data_type_decls": "../../integration_tests/even_list/data_type_decls.ml",
+        "templates": "../../integration_tests/even_list/templates.ml",
+        "normal_typing": "../../integration_tests/even_list/normal_typing.ml",
+        "axioms": "../../integration_tests/even_list/program_axioms.ml",
+        "coverage_typing": "../../integration_tests/even_list/coverage_typing.ml"
     }
 }

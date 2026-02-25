@@ -1,5 +1,5 @@
-(* List length function *)
-(* Computes the length of an integer list *)
+(* Sized list predicate *)
+(* Checks if a list respects a size bound *)
 
 type [@grind] ilist = Nil | Cons of { head : int; tail : ilist }
 

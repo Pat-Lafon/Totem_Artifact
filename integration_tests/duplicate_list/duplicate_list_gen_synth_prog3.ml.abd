@@ -1,0 +1,1 @@
+[v:ilist | ((not (is_nil v) && not (x == 0) && not (s == 0)) || ((is_nil v) && not (x == 0) && (s == 0)) || ((is_nil v) && (x == 0) && (s == 0)) || (not (is_nil v) && (x == 0) && not (s == 0))) && (len v s) && (all_equal v x true)]

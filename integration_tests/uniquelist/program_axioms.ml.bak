@@ -1,0 +1,81 @@
+(* unique *)
+
+let[@axiom] list_tl_unique (l : ilist) (l1 : ilist) =
+  (is_cons l && tail l == l1 && uniq l true) #==> (uniq l1 true)
+
+let[@axiom] list_unique_hd_tl (l : ilist) ((l1 [@exists]) : ilist)
+    ((x [@exists]) : int) =
+  (uniq l true && is_cons l) #==> (head l == x && tail l == l1 && mem l1 x false)
+
+let[@axiom] list_hd_tl_unique (l : ilist) (l1 : ilist) (x : int) =
+  (is_cons l && tail l == l1 && uniq l1 true && head l == x && mem l1 x false) #==> (uniq l true)
+
+
+
+(* Porting over *)
+
+let[@axiom] len_geq_0 (l : ilist) (n : int) = ((len l n))#==>((n >= 0))
+
+let[@axiom] len_0_rev (l : ilist) (res : int) = ((is_nil l))#==>(((0 ==
+res))#==>((len l res)))
+
+let[@axiom] len_0_infer (l : ilist) (res : int) = ((len l res))#==>(((0 == res))#==>((is_nil l)))
+
+let[@axiom] len_0_fwd_pattern (l : ilist) (res : int) = ((is_nil l))#==>(((len l res))#==>((0 == res)))
+
+let[@axiom] len_1 (l : ilist) (xs : ilist) (res : int) = ((len l res))#==>((((is_cons l) && ((tail l) == xs)))#==>(fun ((res_0 [@exists]) : int) -> ((len xs res_0) && ((1 + res_0) == res))))
+
+let[@axiom] len_1_rev (l : ilist) (xs : ilist) (res : int) = (((is_cons l) && ((tail l) == xs)))#==>((fun ((res_0 [@exists]) : int) -> ((len xs res_0) && ((1 + res_0) == res)))#==>((len l res)))
+
+let[@axiom] len_1_fwd_pattern (l : ilist) (xs : ilist) (res : int) = (((is_cons l) && ((tail l) == xs)))#==>(((len l res))#==>(fun ((res_0 [@exists]) : int) -> ((len xs res_0) && ((1 + res_0) == res))))
+
+let[@axiom] mem_0 (l : ilist) (x : int) (res : bool) = ((mem l x res))#==>(((is_nil l))#==>((false == res)))
+
+let[@axiom] mem_1 (l : ilist) (x : int) (h : int) (t : ilist) (res : bool) = ((mem l x res))#==>(((((is_cons l) && ((head l) == h)) && ((tail l) == t)))#==>(fun ((res_1 [@exists]) : bool) -> ((mem t x res_1) && ((((h == x) || res_1) && res) || ((not (((h == x) || res_1))) && (not (res)))))))
+
+let[@axiom] mem_1_rev (l : ilist) (x : int) (h : int) (t : ilist) (res : bool) =
+((((is_cons l) && ((head l) == h)) && ((tail l) == t)))#==>((fun ((res_1
+[@exists]) : bool) -> ((mem t x res_1) && ((((h == x) || res_1) && res) || ((not
+(((h == x) || res_1))) && (not (res))))))#==>((mem l x res)))
+
+let[@axiom] uniq_0 (l : ilist) (res : bool) = ((uniq l res))#==>(((is_nil l))#==>((true == res)))
+
+let[@axiom] uniq_0_rev (l : ilist) (res : bool) = ((is_nil l))#==>(((true == res))#==>((uniq l res)))
+
+let[@axiom] uniq_0_fwd_pattern (l : ilist) (res : bool) = ((is_nil l))#==>(((uniq l res))#==>((true == res)))
+
+
+let[@axiom] uniq_1 (l : ilist) (h : int) (t : ilist) (res : bool) = ((uniq l
+res))#==>(((((is_cons l) && ((head l) == h)) && ((tail l) == t)))#==>(fun
+((res_2 [@exists]) : bool) -> ((mem t h res_2))#==>(fun ((res_3 [@exists]) :
+bool) -> ((uniq t res_3) && ((((not res_2) && res_3) && res) || ((not (((not
+res_2) && res_3))) && (not (res))))))))
+
+let[@axiom] uniq_1_rev (l : ilist) (h : int) (t : ilist) (res : bool) =
+((((is_cons l) && ((head l) == h)) && ((tail l) == t)))#==>(fun ((res_2
+[@exists]) : bool) -> ((mem t h res_2))#==>((fun ((res_3 [@exists]) : bool) ->
+((uniq t res_3) && ((((not res_2) && res_3) && res) || ((not (((not res_2) &&
+res_3))) && (not (res))))))#==>((uniq l res))))
+
+let[@axiom] uniq_1_fwd_pattern (l : ilist) (h : int) (t : ilist) (res : bool) = ((((is_cons l) && ((head l) == h)) && ((tail l) == t)))#==>(((uniq l res))#==>(fun ((res_2 [@exists]) : bool) -> ((mem t h res_2))#==>(fun ((res_3 [@exists]) : bool) -> ((uniq t res_3) && ((((not res_2) && res_3) && res) || ((not (((not res_2) && res_3))) && (not (res))))))))
+
+
+(* *)
+
+
+let[@axiom] finite_list_has_non_member (l : ilist) (n : int) =
+  (len l n) #==> (fun ((x [@exists]) : int) -> (mem l x false))
+
+let[@axiom] uniq_list_exists (n : int) =
+  (n >= 0) #==> (fun ((l [@exists]) : ilist) -> (len l n && uniq l true))
+
+
+let[@axiom] list_tl_unique (l : ilist) (l1 : ilist) =
+  (is_cons l && tail l == l1 && uniq l true) #==> (uniq l1 true)
+
+let[@axiom] list_unique_hd_tl (l : ilist) ((l1 [@exists]) : ilist)
+    ((x [@exists]) : int) =
+  (uniq l true && is_cons l) #==> (head l == x && tail l == l1 && mem l1 x false)
+
+let[@axiom] list_hd_tl_unique (l : ilist) (l1 : ilist) (x : int) =
+  (is_cons l && tail l == l1 && uniq l1 true && head l == x && mem l1 x false) #==> (uniq l true)
