@@ -224,9 +224,31 @@ impl TestEnv {
             return Err("Subtype checking failed (see output above)".to_string());
         }
 
+        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+        if !stdout.contains("Result: true") && !stderr.contains("Result: true") {
+            eprintln!("Subtype check passed but 'Result: true' not found in output");
+            eprintln!("stdout:\n{}", Self::format_output(&stdout));
+            eprintln!("stderr:\n{}", Self::format_output(&stderr));
+            self.print_debug_command(
+                "dune",
+                &[
+                    "exec",
+                    "--",
+                    "bin/main.exe",
+                    "subtype-check",
+                    &meta_config.to_string_lossy(),
+                    &program_file.to_string_lossy(),
+                ],
+                &underapprox_dir,
+            );
+            return Err("Subtype check missing expected 'Result: true' output".to_string());
+        }
+
         Ok(())
     }
-
+    /*
     fn clean(&self, program_file: &Path) -> Result<(), String> {
         let axioms_file = program_file.parent().unwrap().join("program_axioms.ml");
         if axioms_file.exists() {
@@ -234,7 +256,7 @@ impl TestEnv {
                 .map_err(|e| format!("Failed to remove {}: {}", axioms_file.display(), e))?;
         }
         Ok(())
-    }
+    } */
 
     fn run_abduction(&self, test_name: &str, variant_num: u32) -> Result<(), String> {
         let test_dir = self
