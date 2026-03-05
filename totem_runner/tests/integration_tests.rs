@@ -248,15 +248,6 @@ impl TestEnv {
 
         Ok(())
     }
-    /*
-    fn clean(&self, program_file: &Path) -> Result<(), String> {
-        let axioms_file = program_file.parent().unwrap().join("program_axioms.ml");
-        if axioms_file.exists() {
-            fs::remove_file(&axioms_file)
-                .map_err(|e| format!("Failed to remove {}: {}", axioms_file.display(), e))?;
-        }
-        Ok(())
-    } */
 
     fn run_abduction(&self, test_name: &str, variant_num: u32) -> Result<(), String> {
         let test_dir = self
@@ -387,7 +378,6 @@ fn test_sizedlist() -> Result<(), String> {
     env.run_synthesis("sizedlist", 8)?;
     env.run_synthesis("sizedlist", 9)?;
 
-    //env.clean(&program_file)?;
     Ok(())
 }
 
@@ -414,7 +404,6 @@ fn test_sortedlist() -> Result<(), String> {
     env.run_abduction("sortedlist", 3)?;
     env.run_synthesis("sortedlist", 3)?;
 
-    //env.clean(&program_file)?;
     Ok(())
 }
 
@@ -448,7 +437,6 @@ fn test_uniquelist() -> Result<(), String> {
     env.run_abduction("uniquelist", 3)?;
     env.run_synthesis("uniquelist", 3)?;
 
-    //env.clean(&program_file)?;
     Ok(())
 }
 
@@ -481,7 +469,6 @@ fn test_duplicate_list() -> Result<(), String> {
     env.run_synthesis("duplicate_list", 2)?;
     env.run_synthesis("duplicate_list", 3)?;
 
-    //env.clean(&program_file)?;
     Ok(())
 }
 
@@ -494,7 +481,7 @@ fn test_even_list() -> Result<(), String> {
     let typecheck_file = test_dir.join("even_list_gen.ml");
     let meta_config = test_dir.join("meta-config.json");
 
-    env.run_generate(&program_file)?;
+    // env.run_generate(&program_file)?;
 
     // Subtyping tests
     let subtyping_dir = test_dir.join("subtyping_tests");
@@ -518,7 +505,6 @@ fn test_even_list() -> Result<(), String> {
     // env.run_synthesis("even_list", 6)?;
     // env.run_synthesis("even_list", 7)?;
 
-    // env.clean(&program_file)?;
     Ok(())
 }
 
@@ -547,6 +533,5 @@ fn test_depth_tree() -> Result<(), String> {
     // env.run_synthesis("depth_tree", 3)?;
     // env.run_synthesis("depth_tree", 4)?;
 
-    //env.clean(&program_file)?;
     Ok(())
 }
