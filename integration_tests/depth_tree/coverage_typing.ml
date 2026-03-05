@@ -43,17 +43,25 @@ let[@library] True = (v : [%v: bool]) [@under]
 let[@library] False = (not v : [%v: bool]) [@under]
 let[@library] true = (v : [%v: bool]) [@under]
 let[@library] false = (not v : [%v: bool]) [@under]
-let[@library] Nil = (is_nil v : [%v: ilist]) [@under]
+(* let[@library] Nil = (emp v : [%v: int list]) [@under]
 
 let[@library] Cons =
   let x = (true : [%v: int]) [@over] in
-  let xs = (true : [%v: ilist]) [@over] in
-  (is_cons v && head v == x && tail v == xs : [%v: ilist]) [@under]
+  let xs = (true : [%v: int list]) [@over] in
+  (hd v x && tl v xs : [%v: int list]) [@under]
 
 let[@library] list_mem =
-  let xs = (true : [%v: ilist]) [@over] in
+  let xs = (true : [%v: int list]) [@over] in
   let x = (true : [%v: int]) [@over] in
-  (v == list_mem xs x : [%v: bool]) [@under]
+  (v == list_mem xs x : [%v: bool]) [@under] *)
+
+let[@library] Leaf = (is_leaf v : [%v: itree]) [@under]
+
+let[@library] Node =
+  let x = (true : [%v: int]) [@over] in
+  let lt = (true : [%v: itree]) [@over] in
+  let rt = (true : [%v: itree]) [@over] in
+  (is_node v && (value v) == x && (left v) == lt && (right v) == rt : [%v: itree]) [@under]
 
 (* the built-in random generators *)
 
@@ -136,4 +144,16 @@ let[@library] dummy = (true : [%v: unit]) [@under]
 
 let[@library] hidden_list_gen =
   let _ = (true : [%v: unit]) [@over] in
-  (true : [%v: ilist]) [@under]
+  (true : [%v: int list]) [@under]
+
+let[@library] hidden_tree_gen =
+  let _ = (true : [%v: unit]) [@over] in
+  (true : [%v: int tree]) [@under]
+
+(* let[@library] hidden_rbtree_gen =
+  let _ = (true : [%v: unit]) [@over] in
+  (true : [%v: int rbtree]) [@under]
+
+let[@library] hidden_stlc_term_gen =
+  let _ = (true : [%v: unit]) [@over] in
+  (true : [%v: stlc_term]) [@under] *)

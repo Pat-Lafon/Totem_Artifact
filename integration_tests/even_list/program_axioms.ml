@@ -25,5 +25,25 @@ let[@axiom] all_evens_0 (l : ilist) (res : bool) = ((all_evens l res))#==>(((is_
 let[@axiom] all_evens_0_rev (l : ilist) (res : bool) = ((is_nil l))#==>(((true == res))#==>((all_evens l res)))
 let[@axiom] all_evens_0_fwd_pattern (l : ilist) (res : bool) = ((is_nil l))#==>(((all_evens l res))#==>((true == res)))
 let[@axiom] all_evens_1 (l : ilist) (x : int) (xs : ilist) (res : bool) = ((all_evens l res))#==>((((is_cons l) && ((head l) == x) && ((tail l) == xs)))#==>(fun ((res_3 [@exists]) : bool) -> ((is_even x res_3))#==>(fun ((res_4 [@exists]) : bool) -> ((all_evens xs res_4) && (((res_3 && res_4) && res) || ((not ((res_3 && res_4))) && (not (res))))))))
-let[@axiom] all_evens_1_rev (l : ilist) (x : int) (xs : ilist) (res : bool) = (((is_cons l) && ((head l) == x) && ((tail l) == xs)))#==>(fun ((res_3 [@exists]) : bool) -> ((is_even x res_3))#==>((fun ((res_4 [@exists]) : bool) -> ((all_evens xs res_4) && (((res_3 && res_4) && res) || ((not ((res_3 && res_4))) && (not (res))))))#==>((all_evens l res))))
-let[@axiom] all_evens_1_fwd_pattern (l : ilist) (x : int) (xs : ilist) (res : bool) = (((is_cons l) && ((head l) == x) && ((tail l) == xs)))#==>(((all_evens l res))#==>(fun ((res_3 [@exists]) : bool) -> ((is_even x res_3))#==>(fun ((res_4 [@exists]) : bool) -> ((all_evens xs res_4) && (((res_3 && res_4) && res) || ((not ((res_3 && res_4))) && (not (res))))))))
+(* let[@axiom] all_evens_1_rev (l : ilist) (x : int) (xs : ilist) (res : bool) = (((is_cons l) && ((head l) == x) && ((tail l) == xs)))#==>(fun ((res_3 [@exists]) : bool) -> ((fun ((res_4 [@exists]) : bool) -> (((is_even x res_3))&&(all_evens xs res_4) && (((res_3 && res_4) && res) || ((not ((res_3 && res_4))) && (not (res))))))#==>((all_evens l res)))) *)
+let[@axiom] all_evens_1_fwd_pattern (l : ilist) (x : int) (xs : ilist) (res : bool) = (((is_cons l) && ((head l) == x) && ((tail l) == xs)))#==>(((all_evens l res))#==>(fun ((res_3 [@exists]) : bool) -> fun ((res_4 [@exists]) : bool) -> ((is_even x res_3) && (all_evens xs res_4) && (((res_3 && res_4) && res) || ((not ((res_3 && res_4))) && (not (res)))))))
+
+let[@axiom] is_even_double (x : int) = (is_even (x*2) true)
+let[@axiom] is_even_double (x : int) = (is_even (x*2 -1) false)
+
+let[@axiom] is_even_det (x : int) (r1 : bool) (r2 : bool) =
+  (is_even x r1 && is_even x r2) #==> (r1 == r2)
+
+let[@axiom] all_evens_functional (l : ilist) (res : bool) (res2 : bool) = (all_evens l res) #==> ((all_evens l res2) #==> (res == res2))
+
+let[@axiom] all_evens_or (l : ilist) (res[@exists]: bool) = ((all_evens l res))
+
+let[@axiom] all_evens_1_rev (l : ilist) (x : int) (xs : ilist) (res : bool) (res_3 : bool) =
+  (((is_cons l) && ((head l) == x) && ((tail l) == xs) && (is_even x res_3)))
+  #==>
+  ((fun ((res_4 [@exists]) : bool) ->
+    ((all_evens xs res_4) &&
+     (((res_3 && res_4) && res) || ((not ((res_3 && res_4))) && (not (res))))))
+  #==> ((all_evens l res)))
+
+let[@axiom] all_evens_1 (l : ilist) (x : int) (xs : ilist) (res : bool) = ((all_evens l true))#==>((((is_cons l) && ((head l) == x) && ((tail l) == xs)))#==>((is_even x true)&&(((all_evens xs true)))))

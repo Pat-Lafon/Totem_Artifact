@@ -1,7 +1,7 @@
 let[@assert] rty1 =
   let s = ((0 <= v : [%v: int]) [@over]) in
-  ((fun ((n [@exists]) : int) ((x [@exists]) : int) ((x2 [@exists]) : int) ->
-      len v n && n <= s + 1 && n > 0 && s == 0 && all_evens v true
+  ((fun ((n [@exists]) : int) ((x [@exists]) : int) ((x2 [@exists]) : int) ((l2 [@exists]) : ilist)  ->
+       len v n && n <= s + 1 && n > 0 && s == 0 && is_cons v && tail v == l2 && is_nil l2 && all_evens l2 true && head v == x && is_even x true && all_evens v true
      : [%v: ilist])
      [@under])
 

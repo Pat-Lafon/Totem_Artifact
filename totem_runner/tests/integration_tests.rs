@@ -486,15 +486,45 @@ fn test_even_list() -> Result<(), String> {
 
     env.run_typecheck(&typecheck_file, &meta_config)?;
 
-    // env.run_abduction("even_list", 1)?;
-    // env.run_synthesis("even_list", 1)?;
-    // env.run_synthesis("even_list", 2)?;
-    // env.run_synthesis("even_list", 3)?;
+    env.run_abduction("even_list", 1)?;
+    env.run_synthesis("even_list", 1)?;
+    env.run_synthesis("even_list", 2)?;
+    env.run_abduction("even_list", 3)?;
+    env.run_synthesis("even_list", 3)?;
     // env.run_synthesis("even_list", 4)?;
     // env.run_synthesis("even_list", 5)?;
     // env.run_synthesis("even_list", 6)?;
     // env.run_synthesis("even_list", 7)?;
 
     // env.clean(&program_file)?;
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn test_depth_tree() -> Result<(), String> {
+    let env = TestEnv::new();
+    let test_dir = env.repo_root.join("integration_tests/depth_tree");
+    let program_file = test_dir.join("program.ml");
+    let typecheck_file = test_dir.join("depth_tree_gen.ml");
+    let meta_config = test_dir.join("meta-config.json");
+
+    // env.run_generate(&program_file)?;
+
+    // Subtyping tests
+    let subtyping_dir = test_dir.join("subtyping_tests");
+    env.run_subtypecheck(&subtyping_dir.join("leaf.ml"), &meta_config)?;
+    env.run_subtypecheck(&subtyping_dir.join("leaf_rev.ml"), &meta_config)?;
+    env.run_subtypecheck(&subtyping_dir.join("depth_type_check.ml"), &meta_config)?;
+
+    env.run_typecheck(&typecheck_file, &meta_config)?;
+
+    env.run_abduction("depth_tree", 1)?;
+    env.run_synthesis("depth_tree", 1)?;
+    // env.run_synthesis("depth_tree", 2)?;
+    // env.run_synthesis("depth_tree", 3)?;
+    // env.run_synthesis("depth_tree", 4)?;
+
+    //env.clean(&program_file)?;
     Ok(())
 }
