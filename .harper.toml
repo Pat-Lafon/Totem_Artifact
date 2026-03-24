@@ -1,0 +1,4 @@
+[linters]
+ExpandParameter = false
+OrthographicConsistency = false
+SpellCheck = true

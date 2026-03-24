@@ -145,7 +145,10 @@ impl TestEnv {
     fn run_typecheck(&self, program_file: &Path, meta_config: &Path) -> Result<(), String> {
         let underapprox_dir = self.cobb_dir.join("underapproximation_type");
 
-        let output = Command::new("dune")
+        let output = Command::new("opam")
+            .arg("exec")
+            .arg("--")
+            .arg("dune")
             .arg("exec")
             .arg("--")
             .arg("bin/main.exe")
@@ -154,15 +157,23 @@ impl TestEnv {
             .arg(&program_file)
             .current_dir(&underapprox_dir)
             .output()
-            .map_err(|e| format!("Failed to run dune: {}", e))?;
+            .map_err(|e| format!("Failed to run dune via opam: {} (cwd: {}, config: {}, program: {})", e, underapprox_dir.display(), meta_config.display(), program_file.display()))?;
 
         if !output.status.success() {
+            let stdout = String::from_utf8_lossy(&output.stdout).to_string();
             let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+            let formatted_out = Self::format_output(&stdout);
             let formatted_err = Self::format_output(&stderr);
+            if !formatted_out.trim().is_empty() {
+                eprintln!("Type checking stdout:\n{}", formatted_out);
+            }
             eprintln!("Type checking failed:\n{}", formatted_err);
             self.print_debug_command(
-                "dune",
+                "opam",
                 &[
+                    "exec",
+                    "--",
+                    "dune",
                     "exec",
                     "--",
                     "bin/main.exe",
@@ -184,13 +195,16 @@ impl TestEnv {
         let underapprox_dir = self.cobb_dir.join("underapproximation_type");
 
         let cmd_debug = format!(
-            "cd {} && dune exec -- bin/main.exe subtype-check {} {}",
+            "cd {} && opam exec -- dune exec -- bin/main.exe subtype-check {} {}",
             underapprox_dir.display(),
             meta_config.display(),
             program_file.display()
         );
 
-        let child = Command::new("dune")
+        let child = Command::new("opam")
+            .arg("exec")
+            .arg("--")
+            .arg("dune")
             .arg("exec")
             .arg("--")
             .arg("bin/main.exe")
@@ -201,7 +215,7 @@ impl TestEnv {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .map_err(|e| format!("Failed to run dune: {}", e))?;
+            .map_err(|e| format!("Failed to run dune via opam: {} (cwd: {}, config: {}, program: {})", e, underapprox_dir.display(), meta_config.display(), program_file.display()))?;
 
         let output = Self::wait_with_timeout(child, COMMAND_TIMEOUT_SECS, &cmd_debug)?;
 
@@ -210,8 +224,11 @@ impl TestEnv {
             let formatted_err = Self::format_output(&stderr);
             eprintln!("Subtype checking failed:\n{}", formatted_err);
             self.print_debug_command(
-                "dune",
+                "opam",
                 &[
+                    "exec",
+                    "--",
+                    "dune",
                     "exec",
                     "--",
                     "bin/main.exe",
@@ -232,8 +249,11 @@ impl TestEnv {
             eprintln!("stdout:\n{}", Self::format_output(&stdout));
             eprintln!("stderr:\n{}", Self::format_output(&stderr));
             self.print_debug_command(
-                "dune",
+                "opam",
                 &[
+                    "exec",
+                    "--",
+                    "dune",
                     "exec",
                     "--",
                     "bin/main.exe",

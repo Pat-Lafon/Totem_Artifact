@@ -1,0 +1,25 @@
+let rec depth_tree_gen = fun (s : int) ->
+  (let ((xccc4 : bool)) =
+     ((sizecheck : int -> bool) ((s : int) : int) : bool) in
+   (match ((xccc4 : bool) : bool) with
+    | true -> (Leaf : itree)
+    | false ->
+        (let ((xccc5 : bool)) =
+           ((bool_gen : unit -> bool) (() : unit) : bool) in
+         ((match ((xccc5 : bool) : bool) with
+           | true -> (Leaf : itree)
+           | false ->
+               (let ((ss : int)) =
+                  ((subs : int -> int) ((s : int) : int) : int) in
+                (let ((lt : itree)) =
+                   ((depth_tree_gen : int -> itree) ((ss : int) : int) : 
+                   itree) in
+                 (let ((rt : itree)) =
+                    ((depth_tree_gen : int -> itree) ((ss : int) : int) : 
+                    itree) in
+                  (let ((n : int)) =
+                     ((int_gen : unit -> int) (() : unit) : int) in
+                   (Node
+                      (((n : int) : int), ((lt : itree) : itree),
+                        ((rt : itree) : itree)) : itree) : itree) : itree) : 
+                  itree) : itree)) : itree) : itree) : itree) : itree)

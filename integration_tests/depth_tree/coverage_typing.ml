@@ -144,11 +144,11 @@ let[@library] dummy = (true : [%v: unit]) [@under]
 
 let[@library] hidden_list_gen =
   let _ = (true : [%v: unit]) [@over] in
-  (true : [%v: int list]) [@under]
+  (true : [%v: ilist]) [@under]
 
 let[@library] hidden_tree_gen =
   let _ = (true : [%v: unit]) [@over] in
-  (true : [%v: int tree]) [@under]
+  (true : [%v: itree]) [@under]
 
 (* let[@library] hidden_rbtree_gen =
   let _ = (true : [%v: unit]) [@over] in

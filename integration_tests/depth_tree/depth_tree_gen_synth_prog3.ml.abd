@@ -1,0 +1,1 @@
+[v:itree | (not (is_leaf v) && not (s == 0)) && (∃u, ((depth v u) && (u <= s)))]

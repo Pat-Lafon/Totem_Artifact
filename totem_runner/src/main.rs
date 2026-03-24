@@ -65,13 +65,13 @@ fn main() {
         "Cobb_Totem submodule not found. Initialize with: git submodule update --init --recursive"
     );
 
-    // Check dune is available
+    // Check opam is available (dune runs via opam exec)
     Command::new("which")
-        .arg("dune")
+        .arg("opam")
         .output()
         .ok()
         .filter(|o| o.status.success())
-        .ok_or_else(|| panic!("dune not found. Please install OCaml and dune."))
+        .ok_or_else(|| panic!("opam not found. Please install OCaml and opam."))
         .unwrap();
 
     let program_file = match &cli.command {
@@ -127,7 +127,7 @@ fn run_cmd(cmd: &str, args: &[&str], cwd: &Path) -> Result<(), String> {
         .args(args)
         .current_dir(cwd)
         .output()
-        .map_err(|e| format!("Failed to run {}: {}", cmd, e))?;
+        .map_err(|e| format!("Failed to run {} (cwd: {}): {}", cmd, cwd.display(), e))?;
 
     if output.status.success() {
         println!("{}", String::from_utf8_lossy(&output.stdout));
@@ -178,8 +178,11 @@ fn abduction(config: &Config) -> Result<(), String> {
     let underapprox_dir = config.cobb_dir.join("underapproximation_type");
 
     run_cmd(
-        "dune",
+        "opam",
         &[
+            "exec",
+            "--",
+            "dune",
             "exec",
             "--root",
             "..",
@@ -198,8 +201,11 @@ fn type_check_test(config: &Config) -> Result<(), String> {
     let underapprox_dir = config.cobb_dir.join("underapproximation_type");
 
     run_cmd(
-        "dune",
+        "opam",
         &[
+            "exec",
+            "--",
+            "dune",
             "exec",
             "--",
             "bin/main.exe",
@@ -217,8 +223,11 @@ fn synthesis_test(config: &Config) -> Result<(), String> {
     let underapprox_dir = config.cobb_dir.join("underapproximation_type");
 
     run_cmd(
-        "dune",
+        "opam",
         &[
+            "exec",
+            "--",
+            "dune",
             "exec",
             "--root",
             "..",
