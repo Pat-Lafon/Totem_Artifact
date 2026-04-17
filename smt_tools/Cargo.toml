@@ -1,0 +1,11 @@
+[package]
+name = "smt-tools"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+memchr = "2"
+memmap2 = "0.9"
+rayon = "1.10"
+smtlib-lowlevel = "0.3"
