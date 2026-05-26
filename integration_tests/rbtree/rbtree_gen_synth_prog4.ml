@@ -1,9 +1,9 @@
-let rec rbtree_gen (inv : int) (color : bool) (h : int) : irbtree =
+let rec rbtree_gen (inv : int) (clr : bool) (h : int) : irbtree =
   if sizecheck h then
-    if color then Rbtleaf
+    if clr then Rbtleaf
     else if bool_gen () then Rbtleaf
     else Rbtnode (true, Rbtleaf, int_gen (), Rbtleaf)
-  else if color then Err
+  else if clr then Err
   else
     let (c : bool) = bool_gen () in
     if c then

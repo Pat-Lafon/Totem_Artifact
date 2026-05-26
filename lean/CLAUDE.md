@@ -28,11 +28,6 @@ requires `plausible` from git (currently pinned at `v4.28.0`).
 - `Tests/` — regression tests for the tactics in `ProofAutomation/`,
   run via `lake test`. Treat as the canonical usage examples. See the
   "Test suite" section below for the per-module breakdown.
-- `TODO_Counterexamples.md` — open improvements for the
-  `propose_counterexample` tactic, PBT setup, and counterexample
-  workflow (SMT model extraction for existential goals, scaffold
-  compression, etc.).
-- `TODO_ProofAutomation.md` — open improvements for the library.
 
 ## PBT counterexample workflow
 
@@ -47,14 +42,11 @@ entry points consume it:
 - **`ProofAutomation/ProposeCounterexample.lean`** — the tactic: runs PBT
   at the current proof state, lifts the witness to outer-theorem
   variables, and emits a paste-ready `¬ outer` proof scaffold. Leaves
-  are `sorry` for the user to complete. Open work: `TODO_Counterexamples.md`
-  "`propose_counterexample` improvements".
+  are `sorry` for the user to complete.
 
 Per-datatype setup (e.g. `Decidable num_black t h res` / `no_red_red t res`)
 lives in each test file because Plausible's `Testable` synth doesn't
-unfold `def`-wrapped predicates — see `TODO_Counterexamples.md`
-"Upstream Plausible patch for `def`-wrapped predicates" for the
-planned fix.
+unfold `def`-wrapped predicates.
 
 ## ProofAutomation modules
 
@@ -142,7 +134,7 @@ fail the build:
   `¬ outer` proof confirming the spec is genuinely refutable, plus a
   `propose_counterexample` smoke test guarded by
   `#guard_msgs(drop info, drop warning)` (asserts no throw, does NOT
-  pin scaffold text — see `TODO_Counterexamples.md`).
+  pin scaffold text).
 
 Each test file is wrapped in its own `namespace Tests.<Module>` and
 inlines the rbtree (or other) fixture. This is deliberate:

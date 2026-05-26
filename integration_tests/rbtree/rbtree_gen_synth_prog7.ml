@@ -1,5 +1,5 @@
-let rec rbtree_gen (inv : int) (color : bool) (h : int) : irbtree =
-  if sizecheck h then if color then Err else Err else if color then Err else Err
+let rec rbtree_gen (inv : int) (clr : bool) (h : int) : irbtree =
+  if sizecheck h then if clr then Err else Err else if clr then Err else Err
 
 let[@assert] rbtree_gen =
   let inv = (v >= 0 : [%v: int]) [@over] in
