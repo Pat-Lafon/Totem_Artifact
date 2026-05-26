@@ -1,8 +1,4 @@
-mod cegar;
-mod check;
-mod smt;
-mod trace_profile;
-
+use smt_tools::{check, trace_profile};
 use std::path::PathBuf;
 use std::process;
 
@@ -32,30 +28,6 @@ enum Commands {
         #[arg(short = 'n', long, default_value_t = 20)]
         top: usize,
     },
-    /// CEGAR axiom selection (beam_width=1 for greedy with backtracking, >1 for beam search)
-    Cegar {
-        file: PathBuf,
-        #[arg(short = 't', long, default_value_t = 10000)]
-        timeout_ms: u32,
-        #[arg(short = 'd', long, default_value_t = 20)]
-        max_depth: usize,
-        #[arg(short = 'b', long, default_value_t = 1)]
-        beam_width: usize,
-    },
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-fn load_smt_file(file: &PathBuf) -> smt::SmtFile {
-    match smt::parse_smt_file(file.as_path()) {
-        Ok(f) => f,
-        Err(e) => {
-            eprintln!("Error parsing {}: {e}", file.display());
-            process::exit(3);
-        }
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -93,15 +65,6 @@ fn main() {
                     process::exit(3);
                 }
             }
-        }
-        Commands::Cegar {
-            file,
-            timeout_ms,
-            max_depth,
-            beam_width,
-        } => {
-            let smt = load_smt_file(file);
-            cegar::cegar_search(&smt, *timeout_ms, *max_depth, *beam_width);
         }
     }
 }

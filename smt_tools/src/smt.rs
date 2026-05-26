@@ -1,321 +1,158 @@
 use std::io;
-use std::path::Path;
 use std::process::Command;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::str::FromStr;
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone)]
-pub struct Assertion {
-    pub qid: Option<String>,
-    pub text: String,
-}
-
-#[derive(Debug, Clone)]
-pub struct SmtFile {
-    pub preamble: String,
-    pub assertions: Vec<Assertion>,
-    pub postlude: String,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum Z3Result {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Verdict {
     Unsat,
     Sat,
     Unknown,
-    Error(String),
 }
 
-impl std::fmt::Display for Z3Result {
+/// Returned by `<Verdict as FromStr>::from_str` for any input that isn't
+/// one of the three SMT-LIB check-sat tokens. The error carries the
+/// offending input so callers can surface it without re-stringifying.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParseVerdictError(pub String);
+
+impl std::fmt::Display for ParseVerdictError {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "unrecognized z3 verdict {:?}", self.0)
+    }
+}
+
+impl std::error::Error for ParseVerdictError {}
+
+impl FromStr for Verdict {
+    type Err = ParseVerdictError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "unsat" => Ok(Verdict::Unsat),
+            "sat" => Ok(Verdict::Sat),
+            "unknown" => Ok(Verdict::Unknown),
+            other => Err(ParseVerdictError(other.to_string())),
+        }
+    }
+}
+
+pub type Z3Result = Result<Verdict, Z3Error>;
+
+/// Failure modes for `run_z3`. Per root `CLAUDE.md`, every variant is
+/// "fatal before verdict": the query is malformed, the binary is
+/// missing, or Z3 bailed out before producing a recognized first-line
+/// answer.
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum Z3Error {
+    /// `smt_tools::validate` rejected the query before we touched Z3.
+    ValidatorRejected(String),
+    /// An IO operation surrounding the Z3 invocation failed — either
+    /// writing the query to the scratch file or spawning the binary.
+    /// `op` is the operation name for messages; callers can inspect
+    /// `source.kind()` (e.g. `ErrorKind::NotFound` from a spawn means
+    /// z3 is missing from PATH) if they need finer discrimination.
+    Io {
+        op: &'static str,
+        source: io::Error,
+    },
+    /// Z3 ran but did not produce a usable verdict: `(error …)` on
+    /// stdout, anything on stderr, empty stdout, or an unrecognized
+    /// first line. `detail` carries the specific cause.
+    Z3Misbehaved {
+        detail: String,
+        exit_code: Option<i32>,
+    },
+}
+
+impl std::fmt::Display for Verdict {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            Z3Result::Unsat => write!(f, "unsat"),
-            Z3Result::Sat => write!(f, "sat"),
-            Z3Result::Unknown => write!(f, "unknown"),
-            Z3Result::Error(e) => write!(f, "error: {e}"),
+            Verdict::Unsat => write!(f, "unsat"),
+            Verdict::Sat => write!(f, "sat"),
+            Verdict::Unknown => write!(f, "unknown"),
         }
     }
 }
 
-// ---------------------------------------------------------------------------
-// SMT2 file parsing
-// ---------------------------------------------------------------------------
-
-pub fn parse_smt_file(path: &Path) -> io::Result<SmtFile> {
-    let content = std::fs::read_to_string(path)?;
-    let mut preamble = String::new();
-    let mut assertions = Vec::new();
-    let mut postlude = String::new();
-
-    let mut pos = 0;
-    let mut found_assert = false;
-    let mut past_last_assert = false;
-
-    while pos < content.len() {
-        while pos < content.len() && content[pos..].starts_with(|c: char| c.is_whitespace()) {
-            pos += 1;
-        }
-        if pos >= content.len() {
-            break;
-        }
-
-        if content.as_bytes()[pos] == b'(' {
-            let start = pos;
-            let mut depth = 0;
-            let mut in_string = false;
-            let bytes = content.as_bytes();
-            let mut i = pos;
-            while i < bytes.len() {
-                match bytes[i] {
-                    b'"' => in_string = !in_string,
-                    b'(' if !in_string => depth += 1,
-                    b')' if !in_string => {
-                        depth -= 1;
-                        if depth == 0 {
-                            i += 1;
-                            break;
-                        }
-                    }
-                    _ => {}
-                }
-                i += 1;
-            }
-            let form = &content[start..i];
-            pos = i;
-
-            if form.starts_with("(assert ") || form.starts_with("(assert\n") {
-                found_assert = true;
-                assertions.push(Assertion {
-                    qid: extract_qid(form),
-                    text: form.to_string(),
-                });
-            } else if !found_assert {
-                preamble.push_str(form);
-                preamble.push('\n');
-            } else {
-                past_last_assert = true;
-                postlude.push_str(form);
-                postlude.push('\n');
-            }
-        } else {
-            let start = pos;
-            while pos < content.len() && content.as_bytes()[pos] != b'(' {
-                pos += 1;
-            }
-            let text = &content[start..pos];
-            if !found_assert || past_last_assert {
-                if found_assert {
-                    postlude.push_str(text);
-                } else {
-                    preamble.push_str(text);
-                }
+impl std::fmt::Display for Z3Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            Z3Error::ValidatorRejected(msg) => write!(f, "{msg}"),
+            Z3Error::Io { op, source } => write!(f, "{op}: {source}"),
+            Z3Error::Z3Misbehaved { detail, exit_code } => {
+                write!(f, "{detail} (exit status {exit_code:?})")
             }
         }
     }
-
-    Ok(SmtFile {
-        preamble,
-        assertions,
-        postlude,
-    })
 }
 
-fn extract_qid(text: &str) -> Option<String> {
-    let pos = text.find(":qid ")?;
-    let rest = &text[pos + 5..];
-    let name: String = rest
-        .chars()
-        .take_while(|c| !c.is_whitespace() && *c != ')')
-        .collect();
-    if name.is_empty() { None } else { Some(name) }
-}
-
-// ---------------------------------------------------------------------------
-// Z3 runner — manages parallelism for all Z3 invocations
-// ---------------------------------------------------------------------------
-
-static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
-
-pub struct Z3Runner {
-    pool: rayon::ThreadPool,
-}
-
-impl Z3Runner {
-    pub fn new() -> Self {
-        let workers = std::thread::available_parallelism()
-            .map(|n| n.get())
-            .unwrap_or(4);
-        Z3Runner {
-            pool: rayon::ThreadPoolBuilder::new()
-                .num_threads(workers)
-                .build()
-                .expect("failed to create rayon thread pool"),
+impl std::error::Error for Z3Error {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Z3Error::Io { source, .. } => Some(source),
+            _ => None,
         }
     }
-
-    pub fn run_z3(smt_content: &str) -> (Z3Result, String) {
-        let id = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
-        let tmp = std::env::temp_dir().join(format!("smt_tools_{}.smt2", id));
-        if let Err(e) = std::fs::write(&tmp, smt_content) {
-            return (Z3Result::Error(format!("write: {e}")), String::new());
-        }
-
-        match Command::new("z3").arg("-smt2").arg(&tmp).output() {
-            Ok(out) => {
-                let stdout = String::from_utf8_lossy(&out.stdout).to_string();
-                let first_line = stdout.lines().next().unwrap_or("").trim();
-                let result = match first_line {
-                    "unsat" => Z3Result::Unsat,
-                    "sat" => Z3Result::Sat,
-                    _ => Z3Result::Unknown,
-                };
-                (result, stdout)
-            }
-            Err(e) => (Z3Result::Error(format!("exec: {e}")), String::new()),
-        }
-    }
-
-    pub fn eval(&self, smt_content: &str) -> Z3Result {
-        Self::run_z3(smt_content).0
-    }
-
-    /// Run a closure on this runner's thread pool.
-    pub fn install<R: Send>(&self, f: impl FnOnce() -> R + Send) -> R {
-        self.pool.install(f)
-    }
 }
 
-// ---------------------------------------------------------------------------
-// Query builders
-// ---------------------------------------------------------------------------
+pub fn run_z3(smt_content: &str) -> Z3Result {
+    // Validate before invocation — catches the malformed-query class of
+    // bugs (e.g. model entries with forward references) at construction
+    // time rather than letting Z3 emit `(error ...)` on stdout.
+    crate::validate::validate_or_err(smt_content, "run_z3").map_err(Z3Error::ValidatorRejected)?;
 
-pub fn build_query_with_timeout(
-    file: &SmtFile,
-    assertion_indices: &[usize],
-    timeout_ms: u32,
-) -> String {
-    let mut out = String::new();
-    for line in file.preamble.lines() {
-        out.push_str(line);
-        out.push('\n');
-        if line.starts_with("(set-option :rlimit") {
-            out.push_str(&format!("(set-option :timeout {})\n", timeout_ms));
-        }
-    }
-    for &idx in assertion_indices {
-        out.push_str(&file.assertions[idx].text);
-        out.push('\n');
-    }
-    out.push_str(&file.postlude);
-    out
-}
+    // `TempPath` deletes the file on drop, so /tmp doesn't accumulate
+    // `smt_tools_*.smt2` files across runs.
+    let tmp_path = tempfile::Builder::new()
+        .prefix("smt_tools_")
+        .suffix(".smt2")
+        .tempfile()
+        .map_err(|source| Z3Error::Io {
+            op: "creating scratch tempfile",
+            source,
+        })?
+        .into_temp_path();
+    std::fs::write(&tmp_path, smt_content).map_err(|source| Z3Error::Io {
+        op: "writing query to scratch file",
+        source,
+    })?;
 
-pub fn build_model_query(
-    file: &SmtFile,
-    assertion_indices: &[usize],
-    timeout_ms: u32,
-) -> String {
-    let mut query = build_query_with_timeout(file, assertion_indices, timeout_ms);
-    if let Some(pos) = query.find("(check-sat)") {
-        query.truncate(pos);
-    }
-    query.push_str("(check-sat)\n(get-model)\n");
-    query
-}
+    let out = Command::new("z3")
+        .arg("-smt2")
+        .arg(&tmp_path)
+        .output()
+        .map_err(|source| Z3Error::Io {
+            op: "spawning z3",
+            source,
+        })?;
 
-pub fn assertion_name(file: &SmtFile, idx: usize) -> &str {
-    file.assertions[idx].qid.as_deref().unwrap_or("(unnamed)")
-}
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    let exit_code = out.status.code();
+    let misbehaved = |detail: String| Z3Error::Z3Misbehaved { detail, exit_code };
 
-pub fn format_names(file: &SmtFile, indices: &[usize]) -> String {
-    indices
-        .iter()
-        .map(|&i| assertion_name(file, i))
-        .collect::<Vec<_>>()
-        .join(", ")
-}
-
-// ---------------------------------------------------------------------------
-// Model extraction helpers
-// ---------------------------------------------------------------------------
-
-pub fn extract_model(output: &str) -> Option<String> {
-    let after_sat = output
-        .strip_prefix("sat\n")
-        .or_else(|| output.strip_prefix("sat\r\n"))?;
-    let trimmed = after_sat.trim();
-    if !trimmed.starts_with('(') {
-        return None;
-    }
-    let mut depth = 0;
-    for (i, ch) in trimmed.char_indices() {
-        match ch {
-            '(' => depth += 1,
-            ')' => {
-                depth -= 1;
-                if depth == 0 {
-                    return Some(trimmed[..i + 1].to_string());
-                }
-            }
-            _ => {}
-        }
-    }
-    None
-}
-
-pub fn preamble_with_model(preamble: &str, model: &str) -> String {
-    let defined: Vec<String> = model
+    if let Some(err_line) = stdout
         .lines()
-        .filter_map(|line| {
-            line.trim()
-                .strip_prefix("(define-fun ")
-                .and_then(|rest| rest.split_whitespace().next())
-                .map(|s| s.to_string())
-        })
-        .collect();
-
-    let mut result = String::new();
-    for line in preamble.lines() {
-        let is_replaced = line.trim().starts_with("(declare-fun ")
-            && line
-                .trim()
-                .strip_prefix("(declare-fun ")
-                .and_then(|rest| rest.split_whitespace().next())
-                .is_some_and(|name| defined.iter().any(|d| d == name));
-
-        if !is_replaced {
-            result.push_str(line);
-            result.push('\n');
-        }
+        .find(|l| l.trim_start().starts_with("(error "))
+    {
+        return Err(misbehaved(format!(
+            "z3 emitted error on stdout: {}",
+            err_line.trim()
+        )));
+    }
+    if !stderr.trim().is_empty() {
+        return Err(misbehaved(format!("z3 wrote to stderr: {}", stderr.trim())));
     }
 
-    let inner = model
-        .trim()
-        .strip_prefix('(')
-        .and_then(|s| s.strip_suffix(')'))
-        .unwrap_or(model);
-    result.push_str(inner);
-    result.push('\n');
-    result
-}
-
-pub fn check_axiom_against_model(
-    file: &SmtFile,
-    ax_idx: usize,
-    model_preamble: &str,
-    timeout_ms: u32,
-) -> Z3Result {
-    let axiom_text = &file.assertions[ax_idx].text;
-    let inner = axiom_text
-        .strip_prefix("(assert ")
-        .and_then(|s| s.strip_suffix(')'))
-        .unwrap_or(axiom_text);
-
-    let mut query = model_preamble.to_string();
-    query.push_str(&format!("(set-option :timeout {})\n", timeout_ms));
-    query.push_str(&format!("(assert (not {}))\n", inner));
-    query.push_str("(check-sat)\n");
-    Z3Runner::run_z3(&query).0
+    // Empty / whitespace-only stdout is a distinct failure mode from
+    // "unrecognized token"; surface it before handing the line to
+    // `FromStr` so the diagnostic stays specific.
+    stdout
+        .lines()
+        .next()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| misbehaved("z3 produced no output".to_string()))?
+        .parse::<Verdict>()
+        .map_err(|e| misbehaved(format!("z3 produced unrecognized first line {:?}", e.0)))
 }

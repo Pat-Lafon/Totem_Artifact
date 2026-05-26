@@ -486,7 +486,7 @@ pub fn profile_trace(path: &Path) -> io::Result<ProfileResult> {
 // Z3 runner
 // ---------------------------------------------------------------------------
 
-pub fn run_z3_with_trace(
+fn run_z3_with_trace(
     smt_file: &Path,
     trace_output: &Path,
 ) -> io::Result<std::process::ExitStatus> {
@@ -508,66 +508,6 @@ pub fn profile_smt_file(smt_file: &Path) -> io::Result<ProfileResult> {
 
     eprintln!("Parsing trace log {}...", trace_path.display());
     profile_trace(&trace_path)
-}
-
-// ---------------------------------------------------------------------------
-// Inline query diagnosis (for CEGAR integration)
-// ---------------------------------------------------------------------------
-
-/// Run Z3 with tracing on a query string using a short rlimit, then parse the
-/// trace to identify the hottest quantifiers and trigger edges.
-pub fn diagnose_query(smt_content: &str, rlimit: u64, top_n: usize) -> io::Result<ProfileResult> {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    static DIAG_COUNTER: AtomicU64 = AtomicU64::new(0);
-
-    let id = DIAG_COUNTER.fetch_add(1, Ordering::Relaxed);
-    let tmp_dir = std::env::temp_dir();
-    let smt_path = tmp_dir.join(format!("smt_diag_{}.smt2", id));
-    let trace_path = tmp_dir.join(format!("smt_diag_{}.log", id));
-
-    // Inject a short rlimit into the query (replace existing rlimit if present)
-    let content = if smt_content.contains("(set-option :rlimit") {
-        let mut result = String::new();
-        for line in smt_content.lines() {
-            if line.trim().starts_with("(set-option :rlimit") {
-                result.push_str(&format!("(set-option :rlimit {})\n", rlimit));
-            } else if line.trim().starts_with("(set-option :timeout") {
-                // Drop timeout — we're using rlimit for a quick sample
-            } else {
-                result.push_str(line);
-                result.push('\n');
-            }
-        }
-        result
-    } else {
-        format!("(set-option :rlimit {})\n{}", rlimit, smt_content)
-    };
-
-    std::fs::write(&smt_path, &content)?;
-
-    let _status = std::process::Command::new("z3")
-        .arg("trace=true")
-        .arg("proof=true")
-        .arg(format!("trace-file-name={}", trace_path.display()))
-        .arg("-smt2")
-        .arg(&smt_path)
-        .status()?;
-
-    if !trace_path.exists() {
-        return Ok(ProfileResult {
-            stats: vec![],
-            triggers: vec![],
-        });
-    }
-
-    let mut result = profile_trace(&trace_path)?;
-
-    // Clean up
-    let _ = std::fs::remove_file(&smt_path);
-    let _ = std::fs::remove_file(&trace_path);
-
-    result.stats.truncate(top_n);
-    Ok(result)
 }
 
 // ---------------------------------------------------------------------------

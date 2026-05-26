@@ -8,3 +8,14 @@ clap = { version = "4", features = ["derive"] }
 
 [dev-dependencies]
 serial_test = "3"
+smt-tools = { path = "../smt_tools" }
+smtlib-lowlevel = "0.3"
+
+# Mirrors the patch in smt_tools/Cargo.toml. Cargo only honors
+# `[patch.crates-io]` from the root manifest of the current build, so
+# building totem_runner's tests (which depend transitively on
+# smtlib-lowlevel through smt-tools) requires the patch declared here too.
+# Upstream's `bool` SmtlibParse impl is `todo!()` and `ParseError` is not
+# re-exported; the local fork fixes both.
+[patch.crates-io]
+smtlib-lowlevel = { path = "../smt_tools/vendor/smtlib-rs/lowlevel" }

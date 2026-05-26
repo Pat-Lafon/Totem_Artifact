@@ -7,5 +7,13 @@ edition = "2024"
 clap = { version = "4", features = ["derive"] }
 memchr = "2"
 memmap2 = "0.9"
-rayon = "1.10"
 smtlib-lowlevel = "0.3"
+tempfile = "3"
+
+# Local patch of smtlib-lowlevel 0.3.0: upstream's `bool` SmtlibParse impl
+# is `todo!()`, which panics on standard options like
+# `(set-option :produce-unsat-cores true)`. The fork at
+# vendor/smtlib-rs/lowlevel implements `bool` parsing. Replace with a git
+# source (or upstream release) when the fix lands upstream.
+[patch.crates-io]
+smtlib-lowlevel = { path = "vendor/smtlib-rs/lowlevel" }

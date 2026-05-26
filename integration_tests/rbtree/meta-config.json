@@ -1,0 +1,35 @@
+{
+    "mode": "debug",
+    "max_printing_size": 300,
+    "debug_tags": [
+        "preprocess",
+        "typing",
+        "result"
+    ],
+    "logfile": ".log",
+    "resfile": ".result",
+    "abdfile": ".abd",
+    "synfile": ".syn",
+    "collectfile": ".collect",
+    "abd_templates": [
+        "template_eq_0",
+        "template_num_black_0"
+        // "template_black_root",
+        // "template_red_root"
+    ],
+    "num_quantifier": 0,
+    "abduce_rlimit": 2000000,
+    "synth_bound": 100,
+    "synth_rlimit": 50000,
+    "synth_timeout": 1000,
+    "type_rlimit": 70000000,
+    "comp_path": "components.txt",
+    "prim_path": {
+        "data_type_decls": "../../integration_tests/rbtree/data_type_decls.ml",
+        "templates": "../../integration_tests/rbtree/templates.ml",
+        "normal_typing": "../../integration_tests/rbtree/normal_typing.ml",
+        "axioms": "../../integration_tests/rbtree/program_axioms.ml",
+        "coverage_typing": "../../integration_tests/rbtree/coverage_typing.ml",
+        "lean_preamble": "data/predefined/lean_preamble_rbtree.lean"
+    }
+}

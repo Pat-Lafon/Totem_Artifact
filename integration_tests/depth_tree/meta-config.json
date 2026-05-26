@@ -26,6 +26,7 @@
         "templates": "../../integration_tests/depth_tree/templates.ml",
         "normal_typing": "../../integration_tests/depth_tree/normal_typing.ml",
         "axioms": "../../integration_tests/depth_tree/program_axioms.ml",
-        "coverage_typing": "../../integration_tests/depth_tree/coverage_typing.ml"
+        "coverage_typing": "../../integration_tests/depth_tree/coverage_typing.ml",
+        "lean_preamble": "data/predefined/lean_preamble_itree.lean"
     }
 }

@@ -25,6 +25,7 @@
         "templates": "../../integration_tests/uniquelist/templates.ml",
         "normal_typing": "../../integration_tests/uniquelist/normal_typing.ml",
         "axioms": "../../integration_tests/uniquelist/program_axioms.ml",
-        "coverage_typing": "../../integration_tests/uniquelist/coverage_typing.ml"
+        "coverage_typing": "../../integration_tests/uniquelist/coverage_typing.ml",
+        "lean_preamble": "data/predefined/lean_preamble_ilist.lean"
     }
 }

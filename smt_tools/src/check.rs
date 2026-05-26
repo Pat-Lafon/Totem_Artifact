@@ -242,7 +242,7 @@ fn collect_qpaths(
                     .map(|SortedVar(Sym(n), s)| format!("{n}:{s}"))
                     .collect(),
             });
-            collect_qpaths(body, true, path, dt, out);
+            collect_qpaths(body, positive, path, dt, out);
             path.pop();
         }
         Term::SpecConstant(_) | Term::Identifier(_) => {
@@ -325,7 +325,7 @@ pub fn run_check(file: &Path) -> Vec<String> {
     check_str(&input)
 }
 
-pub fn check_str(input: &str) -> Vec<String> {
+fn check_str(input: &str) -> Vec<String> {
     let storage = Storage::new();
     let script = Script::parse(&storage, input).unwrap_or_else(|e| {
         panic!("Parse error: {e}");
@@ -541,16 +541,46 @@ mod tests {
     }
 
     #[test]
-    fn negated_exists_is_forall() {
-        // (not (exists ...)) = (forall ...) — so not(exists(forall)) = forall(forall) = no alternation
+    fn negated_exists_forall_is_forall_exists() {
+        // (not (exists l. forall m. P)) = (forall l. not (forall m. P))
+        //                               = (forall l. exists m. not P) — AE, one alternation.
         let smt = format!(
             "{LIST_PREAMBLE}\
             (assert (not (exists ((l ilist)) (forall ((m ilist)) (= (len l) (len m))))))\n\
             (check-sat)\n"
         );
         let errors = check_str(&smt);
-        // not(exists) = forall, then forall inside = no alternation (AA)
-        assert!(errors.is_empty(), "expected no errors, got: {errors:?}");
+        assert_eq!(errors.len(), 1, "expected one AE alternation, got: {errors:?}");
+        assert!(errors[0].contains("Quantifier alternation"));
+    }
+
+    #[test]
+    fn negated_nested_forall_is_nested_exists() {
+        // (not (forall x. forall y. P)) = (exists x. exists y. not P) — EE, no alternation.
+        // Regression test: a previous bug reset polarity at quantifier boundaries, so the
+        // inner forall was reported as A while the outer was correctly flipped to E,
+        // producing a spurious EA alternation.
+        let smt = format!(
+            "{LIST_PREAMBLE}\
+            (assert (not (forall ((l ilist)) (forall ((m ilist)) (= (len l) (len m))))))\n\
+            (check-sat)\n"
+        );
+        let errors = check_str(&smt);
+        assert!(errors.is_empty(), "expected no errors (EE, not EA), got: {errors:?}");
+    }
+
+    #[test]
+    fn negated_forall_exists_is_exists_forall() {
+        // (not (forall x. exists y. P)) = (exists x. forall y. not P) — EA, one alternation.
+        // Sanity check the flip in the other direction.
+        let smt = format!(
+            "{LIST_PREAMBLE}\
+            (assert (not (forall ((l ilist)) (exists ((m ilist)) (= (len l) (len m))))))\n\
+            (check-sat)\n"
+        );
+        let errors = check_str(&smt);
+        assert_eq!(errors.len(), 1, "expected one EA alternation, got: {errors:?}");
+        assert!(errors[0].contains("Quantifier alternation"));
     }
 
     #[test]

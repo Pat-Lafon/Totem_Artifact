@@ -2,3 +2,5 @@
 **/Cargo.lock
 *.log
 .lake/
+**/encoding_dumps/
+**/settings.local.json
