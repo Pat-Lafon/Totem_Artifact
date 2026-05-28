@@ -65,7 +65,7 @@ def no_red_red_impl : irbtree → Bool
 def no_red_red (t : irbtree) (res : Bool) : Prop :=
   no_red_red_impl t = res
 
-section Axioms
+namespace Axioms
   attribute [local simp] is_rbtleaf is_rbtnode color value left right
     num_black_impl num_black no_red_red_impl no_red_red
   attribute [local grind cases] irbtree Bool
@@ -165,6 +165,7 @@ theorem ax_no_red_red_proposed : ∀ (t : irbtree) (_c : Bool) (l r : irbtree) (
     (no_red_red t true) := by prove_axiom
 
 end Axioms
+open Axioms
 
 -- ============================================================
 -- VERSION 1: Simplified goal (matching Lean Z3 tactic output)

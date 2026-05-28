@@ -118,7 +118,8 @@ private partial def unifyBoolEqs (e : Expr) : MetaM Unit := do
   | And p q => unifyBoolEqs p; unifyBoolEqs q
   | _ =>
     if let some (true, a, b) := isBEqEq e then
-      let _ ← try isDefEq a b catch ex => do rethrowIfFatal ex; pure false
+      if a.hasExprMVar || b.hasExprMVar then
+        let _ ← try isDefEq a b catch ex => do rethrowIfFatal ex; pure false
 
 /-- Decide whether a forward-derived `concl` is uninformative — either a
     tautology (reduces to True, e.g. `0 ≥ 0`) or `isDefEq` to a hypothesis
@@ -349,6 +350,11 @@ private def tryForward (name : Name) (ci : ConstantInfo) (lctx : LocalContext)
     if ← conclusionIsRedundant conclI lctx then return none
     let some finalSlots ← reclassifyMissing slots lctx anchorName? | return none
     let binderArgs ← binders.mapM instantiateMVars
+    -- Drop matches whose binders still contain uninstantiated mvars: the
+    -- emitted `have := Axioms.foo _ ?_mvar.NNN ...` won't elaborate, so the
+    -- suggestion is unactionable. Common failure mode: `binderPinningSweep`
+    -- assigns one Bool binder via `unifyBoolEqs` but leaves siblings unpinned.
+    if binderArgs.any (·.hasExprMVar) then return none
     return some { name, binders := binderArgs, slots := finalSlots,
                   conclusion := conclI, ty := ci.type, mode := .forward }
 
@@ -457,7 +463,6 @@ def searchAxiomsImpl (mode : SearchMode) : TacticM Unit := withMainContext do
       | some (hName, _) => m!"── Forward (anchored on `{hName}`) ──"
       | none => m!"── Forward (new facts from hypotheses) ──"
     logInfo header
-    for r in fwdResults do
-      if slotsComplete r.slots then fmtMatch r
-    for r in fwdResults do
-      if !slotsComplete r.slots then fmtMatch r
+    let fullyComplete := fwdResults.filter (slotsComplete ·.slots)
+    let toShow := if fullyComplete.isEmpty then fwdResults else fullyComplete
+    for r in toShow do fmtMatch r

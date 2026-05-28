@@ -10,9 +10,9 @@ let rec sorted_list_gen = fun (s : int) ->
                (((x : int) : int) <= ((y : int) : int) : bool) in
              ((match ((xccc4 : bool) : bool) with
                | true ->
-                   (let ((idx2ccc0 : int)) = ((s : int) : int) in
+                   (let ((idx2ccc1 : int)) = ((s : int) : int) in
                     (let ((idx11ccc0 : int)) =
-                       ((subs : int -> int) ((idx2ccc0 : int) : int) : 
+                       ((subs : int -> int) ((idx2ccc1 : int) : int) : 
                        int) in
                      (let ((idx49 : int -> ilist)) =
                         ((sorted_list_gen : int -> int -> ilist)

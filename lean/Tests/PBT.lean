@@ -8,7 +8,7 @@ set_option synthInstance.maxSize 256
 /-! # Tests.PBT — regression suite for PBT-based counterexample refutation.
 
 Four examples mirroring `sorry` sites in
-`test_rbtree_typecheck_timeout.lean`. Uses `Plausible.Configuration.quiet
+`Scenarios/test_rbtree_typecheck_timeout.lean`. Uses `Plausible.Configuration.quiet
 := true` so the resulting error is the deterministic bare message
 `Found a counter-example!`. Each `example` is wrapped in `#guard_msgs
 (error) in`, which makes "PBT still refutes" a build-time assertion
@@ -63,7 +63,7 @@ deriving instance Plausible.Arbitrary for irbtree
 /-! ### Counterexample refutations
 
 Each `example` mirrors a `sorry` site in
-`test_rbtree_typecheck_timeout.lean`. PBT finds a witness that satisfies
+`Scenarios/test_rbtree_typecheck_timeout.lean`. PBT finds a witness that satisfies
 the local hypotheses but falsifies the goal — i.e. refutes the spec. The
 `#guard_msgs` block asserts the deterministic "Found a counter-example!"
 error fires. -/
@@ -107,5 +107,21 @@ example (inv h v' : Int) (l' : irbtree) (c : Bool) (l : irbtree) (v : Int) (r : 
     no_red_red (.Rbtnode false l' v' (.Rbtnode c l v r)) true →
     ¬(color (.Rbtnode c l v r) == some true) = true := by
   plausible (config := { numInst := 50000, maxSize := 10, quiet := true })
+
+/-! ### auto_pbt_decidable smoke test
+
+Sweep registers `Decidable` for `num_black` and `no_red_red`. The
+hand-written instances above keep working; the sweep adds parallel
+`num_black.autoDecidable` / `no_red_red.autoDecidable` entries.
+
+`#guard_msgs(drop info, drop warning)` asserts that the sweep runs
+without throwing; the explicit `inferInstance` lines afterward confirm
+the registered instances are actually findable. -/
+
+#guard_msgs(drop info, drop warning) in
+auto_pbt_decidable
+
+example : Decidable (num_black .Rbtleaf 0 true) := inferInstance
+example : Decidable (no_red_red .Rbtleaf true) := inferInstance
 
 end Tests.PBT

@@ -52,9 +52,11 @@ dune exec -- bin/main.exe abduction program.ml
 ```
 
 ### Lean (from Cobb_Totem/ or repo root)
+
+General lake workflow lives in the `lean4-lake-project` skill. Project-specific setup:
+
 ```bash
-lake update && lake build aesop && lake build hammer         # setup
-lake env lean --stdin                                        # validate Lean code
+lake update && lake build aesop && lake build hammer         # prebuild heavy deps
 ```
 
 ## Architecture

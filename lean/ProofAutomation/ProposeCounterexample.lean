@@ -151,10 +151,11 @@ test running on a vacuous proposition. -/
 unsafe def synthTestable (prop' : Expr) : TacticM (Option Expr) := do
   let testableTy ← mkAppM ``Plausible.Testable #[prop']
   -- Each reverted hyp adds a `varTestable` step; nested `→`s add forwarders
-  -- through `NamedBinder`. Default 256 is too tight on the rbtree-shaped
-  -- reverted contexts.
+  -- through `NamedBinder`. Default 256 is too tight on rbtree-shaped reverted
+  -- contexts; 1024 covers depth-tree / rbtree / list and bails ~4× faster than
+  -- 4096 when a `Decidable` is missing for some sub-prop.
   try
-    withOptions (fun o => o.insert `synthInstance.maxSize (.ofNat 4096)) <|
+    withOptions (fun o => o.insert `synthInstance.maxSize (.ofNat 1024)) <|
       synthInstance? testableTy
   catch e => do rethrowIfFatal e; pure none
 
@@ -167,8 +168,13 @@ unsafe def evalCheckIO (prop' inst cfgExpr : Expr) : TacticM (IO PBTOutcome) := 
 
 unsafe def runPBTUnsafe (seed : Option Nat := none) :
     TacticM (Option WitnessMap) := do
+  -- Budget: 1000 instances × max-size 15 ≈ a few seconds when no
+  -- counterexample exists. Genuine refutations are usually witnessed in the
+  -- first ~100 instances (e.g. `s := 1, v := Leaf` for depth_gen_spec); the
+  -- previous 10000 × 30 was paying ~10× for the long-tail tries that almost
+  -- never matter. Raise via custom invocation if a specific case needs it.
   let cfg : Plausible.Configuration :=
-    { numInst := 10000, maxSize := 30, randomSeed := seed }
+    { numInst := 1000, maxSize := 15, randomSeed := seed }
   withoutModifyingState do
     let (_, g) ← (← getMainGoal).revert ((← getLocalHyps).map (Expr.fvarId!))
     g.withContext do
@@ -208,12 +214,102 @@ private def findLocalByName (lctx : LocalContext) (n : Name) : Option LocalDecl 
     | none, some d => if d.userName.eraseMacroScopes == nClean then some d else none
     | _, _ => acc
 
+/-! ### Case-split witness recovery
+
+When a binder is missing from the current lctx, it has typically been
+consumed by a `cases` split. The case tag on the current goal (set by the
+`with | CtorName => ...` clause) names the constructor; for 0-arity
+constructors we can reconstruct the witness directly. For positive-arity
+constructors we scan the current lctx for a contiguous run of fvars whose
+types match the constructor's argument signature — this catches the common
+pattern where the user just wrote `cases v with | Ctor a b c => ...` and
+no other tactic added intervening fvars before `propose_counterexample`. -/
+
+/-- The simple (last) component of `n`, e.g. `Foo.Bar.Baz → "Baz"`. -/
+private def lastComponentStr (n : Name) : String :=
+  match n.eraseMacroScopes with
+  | .str _ s => s
+  | other => other.toString
+
+/-- Render a witness term as a parenthesized splice-ready string. -/
+private def renderCtorWitness (ctorName : Name) (fieldNames : Array String) :
+    String :=
+  if fieldNames.isEmpty then toString ctorName
+  else s!"({ctorName} {String.intercalate " " fieldNames.toList})"
+
+/-- Walk the constructor's type, peeling `numParams` parameters using
+    `binderType`'s head arguments, then check the next `numFields` ∀-arg
+    types defEq the supplied `fields`. Returns `true` iff the field
+    signature lines up. -/
+private def fieldsMatchCtor (ctorName : Name) (indInfo : InductiveVal)
+    (binderType : Expr) (fields : Array LocalDecl) : TacticM Bool := do
+  let mut ctorTy ← inferType (mkConst ctorName (indInfo.levelParams.map mkLevelParam))
+  let typeArgs := binderType.getAppArgs
+  if typeArgs.size < indInfo.numParams then return false
+  for i in [:indInfo.numParams] do
+    ctorTy ← instantiateForall ctorTy #[typeArgs[i]!]
+  for d in fields do
+    ctorTy ← whnf ctorTy
+    let .forallE _ expected _ _ := ctorTy | return false
+    unless (← isDefEq expected d.type) do return false
+    ctorTy ← instantiateForall ctorTy #[d.toExpr]
+  return true
+
+/-- Scan `lctx` for any contiguous window of `numFields` fvars whose types
+    line up with `ctorName`'s signature. Returns the matching userNames in
+    order, or `none` if no window matches. -/
+private def findCtorFieldWindow (ctorName : Name) (indInfo : InductiveVal)
+    (binderType : Expr) (numFields : Nat) (lctx : LocalContext) :
+    TacticM (Option (Array String)) := do
+  let decls : Array LocalDecl :=
+    lctx.decls.foldl (init := #[]) fun acc d? =>
+      match d? with | some d => acc.push d | none => acc
+  if decls.size < numFields then return none
+  for start in [:decls.size - numFields + 1] do
+    let window := decls.extract start (start + numFields)
+    if (← fieldsMatchCtor ctorName indInfo binderType window) then
+      return some (window.map (·.userName.toString))
+  return none
+
+/-- Attempt to reconstruct a witness for an outer binder that's been case-
+    split out of the local context. Returns `none` when recovery isn't
+    possible (binder type isn't an inductive, current goal tag doesn't
+    match a constructor, or — for positive-arity constructors — no run of
+    fvars in the lctx matches the constructor's signature).
+
+    Scans every component of the case tag (not just the last): subsequent
+    `refine`/`rotate_left` calls after `cases` append `.left`/`.right`
+    that bury the ctor name mid-tag.
+
+    Field-window fvars are substituted with their PBT witness values when
+    available — emitted scaffolds reference local fvars otherwise, which
+    don't exist in the standalone `¬ outer` proof the user pastes out. -/
+def recoverCaseSplitWitness (binderName : Name) (binderType : Expr)
+    (witnesses : WitnessMap) : TacticM (Option String) := do
+  let _ := binderName  -- name kept for future scoping/diagnostics
+  let env ← getEnv
+  let some indName := binderType.getAppFn.constName? | return none
+  let some (.inductInfo indInfo) := env.find? indName | return none
+  let tag ← (← getMainGoal).getTag
+  let tagParts : List String := tag.eraseMacroScopes.components.map lastComponentStr
+  let some ctorName := indInfo.ctors.find? (fun c => tagParts.contains (lastComponentStr c))
+    | return none
+  let some (.ctorInfo ctorInfo) := env.find? ctorName | return none
+  if ctorInfo.numFields == 0 then
+    return some (toString ctorName)
+  let some fieldNames ← findCtorFieldWindow ctorName indInfo binderType
+                          ctorInfo.numFields (← getLCtx)
+    | return none
+  let resolved := fieldNames.map fun n =>
+    (witnesses.find? (Name.mkSimple n)).getD n
+  return some (renderCtorWitness ctorName resolved)
+
 /-- Build σ entries for binder slots only (premises are discharged with
-    `(by native_decide)` at scaffold-render time). Throws when any binder
-    can't be resolved — the alternative would be a `?_<binder>` placeholder
-    scaffold that doesn't elaborate cleanly. The error lists the missing
-    binders alongside the PBT witnesses we did find, so the user can either
-    `intro`/rename to expose the binder locally or hand-construct the
+    `(by native_decide)` at scaffold-render time). Falls back to
+    `recoverCaseSplitWitness` for binders that have been consumed by a
+    `cases` split. Throws if a binder is missing and recovery can't
+    reconstruct it; the error lists the unresolved binders alongside the
+    PBT witnesses we did find so the user can hand-construct the
     refutation. -/
 def buildSigma (slots : Array ForallSlot) (witnesses : WitnessMap)
     (outerName : Name) : TacticM (Array SigmaEntry) := do
@@ -231,9 +327,13 @@ def buildSigma (slots : Array ForallSlot) (witnesses : WitnessMap)
           let w := (witnesses.find? key).getD decl.userName.toString
           entries := entries.push { name := n, type := ty, witness := w }
         else
-          missing := missing.push n
+          match ← recoverCaseSplitWitness n ty witnesses with
+          | some w => entries := entries.push { name := n, type := ty, witness := w }
+          | none => missing := missing.push n
       | none =>
-        missing := missing.push n
+        match ← recoverCaseSplitWitness n ty witnesses with
+        | some w => entries := entries.push { name := n, type := ty, witness := w }
+        | none => missing := missing.push n
   unless missing.isEmpty do
     let missingList := String.intercalate ", " (missing.toList.map (·.toString))
     let witnessLines := witnesses.toList.map fun (k, v) => s!"    {k} := {v}"
@@ -336,44 +436,61 @@ end
 
 private def hypName : String := "H1"
 
-/-- Pretty-print the outer's type for use as the `¬ (...)` annotation. We
-    bump pp depth so deeply-nested types (e.g. the existential conclusion
-    of failed_subtyping_12) don't come back with `⋯`, which would prevent
-    the pasted scaffold from elaborating. 200 is enough in practice. -/
-private def formatOuterType (outerType : Expr) : MetaM String := do
+/-- Pretty-print an expression with bumped pp depth so deeply-nested
+    Cobb premise/outer types come back without `⋯` truncation. -/
+private def ppDeep (e : Expr) : MetaM String :=
   withOptions (fun o =>
       o.insert `pp.maxDepth (.ofNat 200)
        |>.insert `pp.deepTerms (.ofBool true)
        |>.insert `pp.deepTerms.threshold (.ofNat 200)) do
-    pure (toString (← Meta.ppExpr outerType))
+    pure (toString (← Meta.ppExpr e))
 
-/-- Walk slots in source order, picking witnesses from `sigma` (binder-slot
-    order) and emitting `(by native_decide)` for premises. -/
-private def formatSpecializeArgs (slots : Array ForallSlot)
-    (sigma : Array SigmaEntry) : String := Id.run do
-  let mut args : Array String := #[]
-  let mut sigmaIdx := 0
-  for slot in slots do
-    match slot with
-    | .binder _ _ => do
-      args := args.push sigma[sigmaIdx]!.witness
-      sigmaIdx := sigmaIdx + 1
-    | .premise _ =>
-      args := args.push "(by native_decide)"
-  return String.intercalate " " args.toList
-
+/-- Walk the outer's forall-telescope in source order, emitting a `let`
+    binding for each binder slot (named after the binder, value is the PBT
+    witness) and a `have hp_i : <premise> := by …` line for each premise
+    slot. Premise types are pretty-printed *after* the binder fvars are in
+    scope, so they read `0 ≤ s` rather than `0 ≤ #0`. Each premise is its
+    own goal, so the user can attack hard ones (e.g. Cobb-shaped `∃` chains
+    pinned by equality conjuncts) with `simp_goal` / `refine_exists_eq` /
+    hand-construction without touching the rest of the scaffold. -/
 def renderScaffold (outerName : String) (outerType : Expr) (slots : Array ForallSlot)
     (sigma : Array SigmaEntry) (concl : Expr) : MetaM Format := do
-  let outerTypeStr ← formatOuterType outerType
-  let specArgs := formatSpecializeArgs slots sigma
-  let body : Format := Id.run (fmtFromHyp concl hypName [] |>.run' 0)
-  return (
-    .text s!"-- spec-bug refutation candidate for `{outerName}`" ++ .line ++
-    .text s!"example : ¬ ({outerTypeStr}) := by" ++
-    .nest 2 (
-      .line ++ .text "intro H" ++
-      .line ++ .text s!"have {hypName} := H {specArgs}" ++
-      .line ++ body))
+  let outerTypeStr ← ppDeep outerType
+  Meta.forallTelescope outerType fun args _body => do
+    let mut lines : Array String := #[]
+    let mut applyArgs : Array String := #[]
+    let mut sigmaIdx := 0
+    let mut hpIdx := 0
+    for h : i in [:slots.size] do
+      let slot := slots[i]!
+      let arg := args[i]!
+      match slot with
+      | .binder _ _ => do
+        let entry := sigma[sigmaIdx]!
+        let nm := entry.name.toString
+        let typeStr ← ppDeep entry.type
+        lines := lines.push s!"let {nm} : {typeStr} := {entry.witness}"
+        applyArgs := applyArgs.push nm
+        sigmaIdx := sigmaIdx + 1
+      | .premise _ => do
+        let ty ← Meta.inferType arg
+        let tyStr ← ppDeep ty
+        let hpName := s!"hp{hpIdx}"
+        lines := lines.push
+          s!"have {hpName} : {tyStr} := by first | native_decide | simp_goal | sorry"
+        applyArgs := applyArgs.push hpName
+        hpIdx := hpIdx + 1
+    let body : Format := Id.run (fmtFromHyp concl hypName [] |>.run' 0)
+    let setupBlock : Format :=
+      lines.foldl (fun acc l => acc ++ .line ++ .text l) (.text "")
+    return (
+      .text s!"-- spec-bug refutation candidate for `{outerName}`" ++ .line ++
+      .text s!"example : ¬ ({outerTypeStr}) := by" ++
+      .nest 2 (
+        .line ++ .text "intro H" ++
+        setupBlock ++
+        .line ++ .text s!"have {hypName} := H {String.intercalate \" \" applyArgs.toList}" ++
+        .line ++ body))
 
 /-! ## Tactic frontend -/
 

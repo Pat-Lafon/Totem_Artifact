@@ -91,7 +91,7 @@ def rbtree_invariant (t : irbtree) (h : Int) (res : Bool) : Prop :=
 
 -- Axiom section: definitions are available to grind/simp for proving axioms.
 -- lean_dump.ml emits 'end Axioms' after the axioms, before the subtyping query.
-section Axioms
+namespace Axioms
   attribute [local simp] is_rbtleaf is_rbtnode color value left right
     num_black_impl num_black no_red_red_impl no_red_red
     rbtree_invariant_impl rbtree_invariant
@@ -189,78 +189,57 @@ theorem ax_28 : ∀ (t : irbtree), (∀ (l' : irbtree), (∀ (v' : Int), (∀ (r
 theorem ax_29 : ∀ (t : irbtree), (∀ (c : Bool), (∀ (l : irbtree), (∀ (r : irbtree), (∀ (res : Bool), ((no_red_red t res) → (((is_rbtnode t) ∧ (((color t) == c) ∧ (((left t) == l) ∧ ((right t) == r)))) → (¬(c) → (∃ (res_4 : Bool), ((no_red_red l res_4) ∧ (∃ (res_5 : Bool), ((no_red_red r res_5) ∧ ((((res_4) ∧ (res_5)) ∧ (res)) ∨ (¬((res_4) ∧ (res_5)) ∧ ¬(res)))))))))))))) := by
   prove_axiom
 
+@[grind →] theorem ax_31 : ∀ (t : irbtree), (∀ (h : Int), ((num_black t h true) → (h >= 0))) := by
+  prove_axiom
 
-theorem ax_31 : ∀ (t : irbtree), (∀ (h : Int), ((num_black t h true) → (h >= 0))) := by
-  intros t
-  induction t with
-  | Rbtleaf =>
-    grind
-  | Rbtnode c' l' v' r' lh rh =>
-    intros h h2
-    simp at h2
-    cases c' with
-    | true =>
-      simp_hyps
-      grind
-    | false =>
-      simp at h2
-      specialize (lh (h-1))
-      simp_hyps
-      grind
-
+@[grind →] theorem ax_31_impl : ∀ (t : irbtree) (h : Int),
+    num_black_impl t h = true → h ≥ 0 := by
+  prove_axiom
 
 theorem ax_30 : ∀ (t : irbtree), (∀ (c'' : Bool), (∀ (l'' : irbtree), (∀ (v'' : Int), (∀ (r'' : irbtree), ((((((is_rbtnode t) ∧ ((color t) == c'')) ∧ ((left t) == l'')) ∧ ((value t) == v'')) ∧ ((right t) == r'')) → ((num_black t 0 true) → (c''))))))) := by
-  intros t c l v r h1 h2
-  simp_hyps
-  cases t with
-  | Rbtleaf =>
-    contradiction
-  | Rbtnode color l' v' r' =>
-    simp at h2
-    cases color with
-    | true =>
-      grind
-    | false =>
-      simp at h2 h_8 h_11 h_14 h_12 h_15
-      simp_hyps
-      have := (ax_31 l' (-1))
-      grind
+  prove_axiom
 
 theorem ax_32 : ∀ (t : irbtree), (∀ (h : Int), (∀ (c : Bool), (∀ (l : irbtree), (∀ (r : irbtree), (∀ (res : Bool), ((num_black t h res) → (((is_rbtnode t) ∧ (((color t) == c) ∧ (((left t) == l) ∧ ((right t) == r)))) → (¬(c) → (∃ (res_0 : Bool), ((num_black l (h - 1) res_0) ∧ (∃ (res_1 : Bool), ((num_black r (h - 1) res_1) ∧ ((((res_0) ∧ (res_1)) ∧ (res)) ∨ (¬((res_0) ∧ (res_1)) ∧ ¬(res))))))))))))))) := by
   prove_axiom
 
+theorem ax_33 : ∀ (t : irbtree), (∀ (l' : irbtree), (∀ (v' : Int), (∀ (r' : irbtree), ((((((is_rbtnode t) ∧ ((color t) == true)) ∧ ((left t) == l')) ∧ ((value t) == v')) ∧ ((right t) == r')) → ((no_red_red l' true) → ((no_red_red r' true) → (((is_rbtleaf l') ∨ ((is_rbtnode l') ∧ ¬((color l') == true))) → (((is_rbtleaf r') ∨ ((is_rbtnode r') ∧ ¬((color r') == true))) → (no_red_red t true))))))))) := by
+  prove_axiom
 
-theorem ax_num_black_black_false_node_proposed : ∀ (t : irbtree) (h : Int) (l' : irbtree) (v' : Int) (r' : irbtree),
-  (((is_rbtnode t = true ∧ color t = some false) ∧ left t = some l') ∧ value t = some v') ∧ right t = some r' →
-    num_black l' (h - 1) true → num_black r' (h - 1) true → num_black t h true := by
-    prove_axiom
+theorem ax_34 : ∀ (t : irbtree), (∀ (h_3 : Int), (∀ (l' : irbtree), (∀ (v' : Int), (∀ (r' : irbtree), ((((((is_rbtnode t) ∧ ((color t) == true)) ∧ ((left t) == l')) ∧ ((value t) == v')) ∧ ((right t) == r')) → ((num_black l' h_3 true) → ((num_black r' h_3 true) → (num_black t h_3 true)))))))) := by
+  prove_axiom
+
+theorem ax_35 : ∀ (t : irbtree), (∀ (h : Int), (∀ (l' : irbtree), (∀ (v' : Int), (∀ (r' : irbtree), ((((((is_rbtnode t) ∧ ((color t) == false)) ∧ ((left t) == l')) ∧ ((value t) == v')) ∧ ((right t) == r')) → ((num_black l' (h - 1) true) → ((num_black r' (h - 1) true) → (num_black t h true)))))))) := by
+  prove_axiom
+
+theorem ax_36 : ∀ (t : irbtree), (∀ (l' : irbtree), (∀ (v' : Int), (∀ (r' : irbtree), ((((((is_rbtnode t) ∧ ((color t) == true)) ∧ ((left t) == l')) ∧ ((value t) == v')) ∧ ((right t) == r')) → ((no_red_red l' true) → (((is_rbtleaf l') ∨ ((is_rbtnode l') ∧ ¬((color l') == true))) → ((no_red_red r' true) → (((is_rbtleaf r') ∨ ((is_rbtnode r') ∧ ¬((color r') == true))) → (no_red_red t true))))))))) := by
+  prove_axiom
+
+theorem ax_37 : ∀ (t : irbtree), (∀ (h : Int), (∀ (l' : irbtree), (∀ (v' : Int), (∀ (r' : irbtree), ((((((is_rbtnode t) ∧ ((color t) == false)) ∧ ((left t) == l')) ∧ ((value t) == v')) ∧ ((right t) == r')) → ((no_red_red l' true) → ((((h - 1) == 0) → ((is_rbtleaf l') ∨ ((is_rbtnode l') ∧ ¬((color l') == false)))) → ((no_red_red r' true) → ((((h - 1) == 0) → ((is_rbtleaf r') ∨ ((is_rbtnode r') ∧ ¬((color r') == false)))) → (no_red_red t true)))))))))) := by
+  prove_axiom
+
+theorem ax_38 : ∀ (t : irbtree), (∀ (h : Int), (∀ (l' : irbtree), (∀ (v' : Int), (∀ (r' : irbtree), ((((((is_rbtnode t) ∧ ((color t) == true)) ∧ ((left t) == l')) ∧ ((value t) == v')) ∧ ((right t) == r')) → ((num_black l' h true) → ((num_black r' h true) → (num_black t h true)))))))) := by
+  prove_axiom
+
 end Axioms
+open Axioms
 
-theorem failed_subtyping_3 : ∀ (inv : Int), ((inv >= 0) → (∀ (clr : Bool), (∀ (h : Int), (((h >= 0) ∧ (((clr) → ((h + h) == inv)) ∧ (¬(clr) → (((h + h) + 1) == inv)))) → (∀ (v : irbtree), (((∃ (x_0 : Bool), (∃ (c : Bool), (∃ (h_0 : Int), (∃ (lt4 : irbtree), (∃ (rt4 : irbtree), (∃ (inv_1 : Int), (∃ (inv_2 : Int), (∃ (h_1 : Int), (∃ (x_13 : Int), (∃ (x_24 : Int), ((h > 0) ∧ (¬(clr) ∧ (¬(c) ∧ (((inv - 2) >= 0) ∧ (((inv - 2) < inv) ∧ (((h - 1) >= 0) ∧ (((((h - 1) + (h - 1)) + 1) == (inv - 2)) ∧ ((num_black lt4 (h - 1) true) ∧ ((no_red_red lt4 true) ∧ ((((h - 1) == 0) → ((is_rbtleaf lt4) ∨ ((is_rbtnode lt4) ∧ ¬((color lt4) == false)))) ∧ (((inv - 2) >= 0) ∧ (((inv - 2) < inv) ∧ (((h - 1) >= 0) ∧ (((((h - 1) + (h - 1)) + 1) == (inv - 2)) ∧ ((num_black rt4 (h - 1) true) ∧ ((no_red_red rt4 true) ∧ ((((h - 1) == 0) → ((is_rbtleaf rt4) ∨ ((is_rbtnode rt4) ∧ ¬((color rt4) == false)))) ∧ ((is_rbtnode v) ∧ (((color v) == false) ∧ (((value v) == x_24) ∧ (((left v) == lt4) ∧ ((right v) == rt4)))))))))))))))))))))))))))))))) ∨ (∃ (lt3 : irbtree), (∃ (rt3 : irbtree), (∃ (x_20 : Int), ((h > 0) ∧ (¬(clr) ∧ (((inv - 1) >= 0) ∧ (((inv - 1) < inv) ∧ ((h >= 0) ∧ (((h + h) == (inv - 1)) ∧ ((num_black lt3 h true) ∧ ((no_red_red lt3 true) ∧ ((num_black rt3 h true) ∧ ((no_red_red rt3 true) ∧ (((is_rbtleaf rt3) ∨ ((is_rbtnode rt3) ∧ ¬((color rt3) == true))) ∧ (((is_rbtleaf lt3) ∨ ((is_rbtnode lt3) ∧ ¬((color lt3) == true))) ∧ (((value v) == x_20) ∧ (((left v) == lt3) ∧ (((right v) == rt3) ∧ (((is_rbtleaf v) ∨ ((is_rbtnode v) ∧ ¬((color v) == false))) ∧ ((is_rbtnode v) ∧ ((color v) == true)))))))))))))))))))))) → ((h > 0) ∧ (¬(clr) ∧ ((num_black v h true) ∧ ((no_red_red v true) ∧ (¬(clr) → ((h == 0) → ((is_rbtleaf v) ∨ ((is_rbtnode v) ∧ ¬((color v) == false))))))))))))))) := by
+theorem failed_subtyping_3 : ∀ (inv : Int), ((inv >= 0) → (∀ (clr : Bool), (∀ (h : Int), (((h >= 0) ∧ (((clr) → ((h + h) == inv)) ∧ (¬(clr) → (((h + h) + 1) == inv)))) → (∀ (v : irbtree), ((∃ (t : irbtree), ((is_rbtleaf t) ∧ ((is_rbtnode v) ∧ (((color v) == true) ∧ (((is_rbtleaf v) ∨ ((is_rbtnode v) ∧ ¬((color v) == false))) ∧ ((clr) ∧ (((left v) == t) ∧ ((right v) == t)))))))) → ((is_rbtleaf v) ∨ (((is_rbtnode v) ∧ ¬((color v) == false)) ∧ ((is_rbtnode v) ∧ (((color v) == true) ∧ ((num_black v 0 true) ∧ ((no_red_red v true) ∧ (clr))))))))))))) := by
   intros inv h1 clr h h2 v h3
   simp_hyps
-  cases h3 with
-  | inl h3 =>
+  cases v with
+  | Rbtleaf =>
+    grind
+  | Rbtnode c' l' v' r' =>
     simp_hyps
-    cases v with
-    | Rbtleaf => grind
-    | Rbtnode c' l' v' r' =>
-      simp_hyps
-      subst_vars
+    cases r' with
+    | Rbtnode => grind
+    | Rbtleaf =>
+      clear h_14
       simp_goal
-      · -- propose_axiom "ax_num_black_black_false_node_proposed" h_32 h_39
-         have := ax_num_black_black_false_node_proposed (irbtree.Rbtnode false l' v' r') h l' v' r' (by grind) (by grind) (by grind)
-         grind
-      · z3_local only [ax_28]
-  | inr h3 =>
-    cases v with
-    | Rbtleaf => grind
-    | Rbtnode c' l' v' r' =>
-      simp_hyps
-      simp_goal
-      · propose_axiom "ax_num_black_proposed" h_31 h_33
-      · propose_axiom "ax_no_red_red_false_node_2_proposed" h_32 h_34 h_35 h_36
+      · apply (ax_38 (irbtree.Rbtnode true irbtree.Rbtleaf v' irbtree.Rbtleaf) 0 irbtree.Rbtleaf v' irbtree.Rbtleaf (by grind))
+        apply ax_1 <;> grind
+        apply ax_1 <;> grind
+      · exact ax_25 (irbtree.Rbtnode true irbtree.Rbtleaf v'
+  irbtree.Rbtleaf) true irbtree.Rbtleaf irbtree.Rbtleaf true (by grind) (by grind) (by grind) (by grind) (by grind)
 
-z3? failed_subtyping_3
-
-#eval ppTheoremsAsOcamlAxioms "_proposed"
+z3 failed_subtyping_3

@@ -33,6 +33,13 @@ theorem test_z3_local_only_axiom : ∀ (n : Int), n = 5 → n + 0 = 5 := by
 theorem test_z3_local_only_empty : ∀ (n : Int), n = 99 → (1 : Int) + 1 = 2 := by
   intros _ _; z3_local only []
 
+-- Verbose `?` mode requests unsat cores from Z3. When no `:named` axiom is
+-- needed (e.g. `only []`, or theory reasoning closes the negated goal
+-- alone), Z3 emits `()` — the empty core. Must be accepted as a legitimate
+-- `unsat`, not flagged as malformed.
+theorem test_z3_local_verbose_empty_core : ∀ (n : Int), n = 99 → (1 : Int) + 1 = 2 := by
+  intros _ _; z3_local? only []
+
 -- After `cases`, each branch closes via z3_local.
 theorem test_z3_local_after_cases (b : Bool) : b = true ∨ b = false := by
   cases b <;> z3_local
@@ -56,8 +63,59 @@ axiom appearing here (e.g. `sorryAx`) is a regression. -/
 /-- info: 'Tests.Z3Local.test_z3_local_only_empty' depends on axioms: [ProofAutomation.Trusted.z3SmtTrusted] -/
 #guard_msgs in #print axioms Tests.Z3Local.test_z3_local_only_empty
 
+/-- info: 'Tests.Z3Local.test_z3_local_verbose_empty_core' depends on axioms: [ProofAutomation.Trusted.z3SmtTrusted] -/
+#guard_msgs in #print axioms Tests.Z3Local.test_z3_local_verbose_empty_core
+
 /-- info: 'Tests.Z3Local.test_z3_local_after_cases' depends on axioms: [ProofAutomation.Trusted.z3SmtTrusted] -/
 #guard_msgs in #print axioms Tests.Z3Local.test_z3_local_after_cases
+
+/-! ## Binder/declared-symbol shadowing contract
+
+A quantifier binder whose name matches a previously-declared SMT symbol
+(datatype, constructor, selector, declared sort, or uninterpreted
+function) must be rejected at the translator — otherwise Z3 silently
+rebinds the inner reference and fails downstream with a cryptic
+`select requires N arguments` message.
+
+Here `Box.Mk` declares a selector `shadow_field`; the theorem's later
+`forall (shadow_field : Int)` binder collides with it. -/
+
+namespace Tests.Z3LocalShadow
+
+inductive Box where
+  | Mk (shadow_field : Int)
+
+/--
+error: z3 toSmt: forall binder `shadow_field` shadows a top-level SMT symbol of the same name (datatype, constructor, selector, declared sort, or uninterpreted function). Z3 would silently rebind the inner reference to the binder, then fail at the call site with an unhelpful arity/sort message (typically 'select requires 0 arguments'). Rename the binder in the source theorem to a non-colliding name.
+-/
+#guard_msgs in
+example : ∀ (b : Box) (shadow_field : Int), b = b ∧ shadow_field = shadow_field := by
+  intros; z3_local
+
+end Tests.Z3LocalShadow
+
+/-! ## Duplicate-in-`only` contract
+
+Listing the same axiom twice in `only [...]` would emit two `:named`
+assertions with the same label, which Z3 rejects with
+`named expression already defined`. The filter must surface the dup
+by name *before* dispatch, not let Z3 crash on a malformed query. -/
+
+namespace Tests.Z3LocalDupOnly
+
+namespace Axioms
+theorem ax_dup_ok : ∀ (n : Int), n = n := by intros; rfl
+end Axioms
+open Axioms
+
+/--
+error: z3_local: axiom 'Tests.Z3LocalDupOnly.Axioms.ax_dup_ok' listed more than once in `only [...]` (would emit a duplicate `:named` assertion and crash Z3). Remove the duplicate.
+-/
+#guard_msgs in
+example : ∀ (n : Int), n + 0 = n := by
+  intro _; z3_local only [ax_dup_ok, ax_dup_ok]
+
+end Tests.Z3LocalDupOnly
 
 /-! ## Untranslatable-axiom contract (PLAN_z3_unify.md decision 1)
 

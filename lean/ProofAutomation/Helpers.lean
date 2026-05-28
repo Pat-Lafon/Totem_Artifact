@@ -170,6 +170,7 @@ def applyAxiomFilter {m : Type → Type}
     -- Sort for stable `#guard_msgs` across env-hash shifts.
     let available := (kept.map (·.1)).qsort Name.lt
     let mut result : Array (Name × Expr) := #[]
+    let mut seen : Std.HashSet Name := {}
     for n in names do
       let resN ← try
         resolveGlobalConstNoOverloadCore n
@@ -182,6 +183,10 @@ def applyAxiomFilter {m : Type → Type}
           the current-file Axioms namespace.\n\
           Available axioms: {available}"
       | some e =>
+        if seen.contains resN then
+          throwError m!"{cmdName}: axiom '{resN}' listed more than once in `only [...]` \
+            (would emit a duplicate `:named` assertion and crash Z3). Remove the duplicate."
+        seen := seen.insert resN
         result := result.push (resN, e)
     return result
 

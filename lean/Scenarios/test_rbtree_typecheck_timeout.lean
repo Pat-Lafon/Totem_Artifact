@@ -296,9 +296,7 @@ theorem failed_subtyping_12 : ∀ (inv : Int), ((inv >= 0) → (∀ (clr : Bool)
                 (value irbtree.Rbtleaf == some x_31) = true ∧
                 (left irbtree.Rbtleaf == some lt4) = true ∧
                 (right irbtree.Rbtleaf == some rt4) = true) by
-          exact ⟨true, Or.inl ⟨rfl, h.1⟩⟩  -- swap to `⟨false, Or.inr ⟨by decide, h.2⟩⟩` to pick the other side
-        -- Both branches are vacuous: h_22 : num_black Rbtleaf h true forces h = 0,
-        -- contradicting h_20 : 0 < h.
+          grind
         refine ⟨?_, ?_⟩ <;>
           (exfalso; simp [num_black, num_black_impl] at h_22; omega)
   | Rbtnode c' l' v' r' =>

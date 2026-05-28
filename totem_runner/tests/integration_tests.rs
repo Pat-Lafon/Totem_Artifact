@@ -1,8 +1,8 @@
 use serial_test::serial;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
-use std::time::{Duration, SystemTime};
+use std::process::{Command, Stdio};
+use std::time::Duration;
 
 mod common;
 use common::{wait_with_timeout, WaitOutcome};
@@ -14,12 +14,6 @@ struct TestEnv {
     repo_root: PathBuf,
     cobb_dir: PathBuf,
     cobb_totem_dir: PathBuf,
-}
-
-struct DumpEntry {
-    path: PathBuf,
-    name: String,
-    mtime: Option<SystemTime>,
 }
 
 impl TestEnv {
@@ -41,7 +35,6 @@ impl TestEnv {
         timeout_secs: u64,
         cmd_debug: &str,
     ) -> Result<std::process::Output, String> {
-        let start_system = SystemTime::now();
         let outcome = wait_with_timeout(child, Duration::from_secs(timeout_secs))
             .map_err(|e| format!("Failed to wait for child: {}", e))?;
         let (stdout, stderr) = match outcome {
@@ -54,91 +47,48 @@ impl TestEnv {
             timeout_secs, cmd_debug
         );
 
-        let dumps = Self::collect_dumps();
-        let latest = dumps
-            .iter()
-            .filter(|d| d.mtime.map_or(false, |t| t >= start_system))
-            .max_by_key(|d| d.mtime);
+        let stderr_str = String::from_utf8_lossy(&stderr);
+        let latest_dump = Self::latest_lean_dump_from_stderr(&stderr_str);
 
-        match latest {
-            // Happy path: the in-flight Lean dump tells the whole story —
-            // suppress the noisy stdout/stderr type-check spam and surface
-            // the actual subtyping goal Z3 was stuck on.
-            Some(d) => {
-                let goal = Self::extract_failed_theorem(&d.path)
+        match latest_dump {
+            // The in-flight Lean dump tells the whole story — suppress the
+            // noisy stdout/stderr type-check spam and surface the actual
+            // subtyping goal Z3 was stuck on.
+            Some(path) => {
+                let goal = Self::extract_failed_theorem(&path)
                     .unwrap_or_else(|| "<could not extract theorem from dump>".to_string());
                 Err(format!(
                     "{}\nLast Lean dump from this run: {}\n--- failed subtyping goal ---\n{}",
                     header,
-                    d.path.display(),
+                    path.display(),
                     goal
                 ))
             }
-            // Cobb didn't dump anything for this run. Show the child's output
-            // plus an inventory of every dump in the temp dir so we can tell
-            // a real harness bug ("never reached SMT") from a clock/race issue
-            // ("dump exists but mtime < start_system").
+            // Cobb didn't announce a dump on stderr — show the child's
+            // output so we can diagnose whether it never reached SMT.
             None => Err(format!(
-                "{}\nNo subtyping_failed_*.lean dumps found in {} created after run start.\n\
+                "{}\nNo `Dumped failed subtyping query to ...` line found on child stderr.\n\
                  --- child stdout (last {} lines) ---\n{}\n\
-                 --- child stderr (last {} lines) ---\n{}\n\
-                 --- temp dir inventory ---\n{}",
+                 --- child stderr (last {} lines) ---\n{}",
                 header,
-                std::env::temp_dir().display(),
                 ERROR_OUTPUT_LINES,
                 Self::format_output(&String::from_utf8_lossy(&stdout)),
                 ERROR_OUTPUT_LINES,
-                Self::format_output(&String::from_utf8_lossy(&stderr)),
-                Self::format_inventory(&dumps, start_system),
+                Self::format_output(&stderr_str),
             )),
         }
     }
 
-    /// Scan the system temp dir for every `subtyping_failed_*.lean` file.
-    /// Returns the raw list — callers filter by mtime.
-    fn collect_dumps() -> Vec<DumpEntry> {
-        let temp_dir = std::env::temp_dir();
-        let entries = match fs::read_dir(&temp_dir) {
-            Ok(e) => e,
-            Err(_) => return Vec::new(),
-        };
-        let mut out = Vec::new();
-        for entry in entries.flatten() {
-            let path = entry.path();
-            let Some(name) = path.file_name().map(|n| n.to_string_lossy().into_owned()) else {
-                continue;
-            };
-            if !name.starts_with("subtyping_failed_") || !name.ends_with(".lean") {
-                continue;
-            }
-            let mtime = entry.metadata().and_then(|m| m.modified()).ok();
-            out.push(DumpEntry { path, name, mtime });
-        }
-        out
-    }
-
-    /// Human-readable listing of every dump in the temp dir, flagging which
-    /// ones belong to this run. Used only when no fresh dump was found.
-    fn format_inventory(dumps: &[DumpEntry], since: SystemTime) -> String {
-        let temp_dir = std::env::temp_dir();
-        if dumps.is_empty() {
-            return match fs::read_dir(&temp_dir) {
-                Ok(_) => "  <no subtyping_failed_*.lean files in temp dir>".to_string(),
-                Err(e) => format!("  <could not read {}: {}>", temp_dir.display(), e),
-            };
-        }
-        let mut lines: Vec<String> = dumps
-            .iter()
-            .map(|d| match d.mtime {
-                Some(t) => {
-                    let cmp = if t >= since { "AFTER start" } else { "before start" };
-                    format!("  {} mtime={:?} ({})", d.name, t, cmp)
-                }
-                None => format!("  {} <mtime unavailable>", d.name),
-            })
-            .collect();
-        lines.sort();
-        lines.join("\n")
+    /// Cobb prints `Dumped failed subtyping query to <path>` on stderr for
+    /// each dumped query (see `Cobb/underapproximation_type/subtyping/lean_dump.ml`).
+    /// Return the path from the last such line, which corresponds to the
+    /// query Cobb was working on when it was killed.
+    fn latest_lean_dump_from_stderr(stderr: &str) -> Option<PathBuf> {
+        stderr
+            .lines()
+            .rev()
+            .find_map(|line| line.strip_prefix("Dumped failed subtyping query to "))
+            .map(|p| PathBuf::from(p.trim()))
     }
 
     /// Pull the `theorem failed_subtyping_N : <goal> := by sorry` block out
@@ -163,44 +113,31 @@ impl TestEnv {
         format!("{head}\n... ({omitted} lines omitted) ...\n{tail}")
     }
 
-    fn print_debug_command(&self, cmd: &str, args: &[&str], cwd: &Path) {
-        eprintln!("\n❌ To debug, run:");
-        eprintln!("cd {} && {} {}", cwd.display(), cmd, args.join(" "));
+    fn debug_hint(program: &str, args: &[&str], cwd: &Path) -> String {
+        format!("cd {} && {} {}", cwd.display(), program, args.join(" "))
     }
 
     fn run_generate(&self, program_file: &Path) -> Result<(), String> {
         let output_path = program_file.parent().unwrap().join("program_axioms.ml");
-
-        // Clean up any previous axioms
         let _ = fs::remove_file(&output_path);
 
+        let output_str = output_path.to_string_lossy();
+        let prog_str = program_file.to_string_lossy();
+        let args: Vec<&str> = vec![
+            "run", "--release", "--", "--export-axioms", &output_str, &prog_str,
+        ];
+        let cmd_debug = Self::debug_hint("cargo", &args, &self.cobb_totem_dir);
+
         let output = Command::new("cargo")
-            .arg("run")
-            .arg("--release")
-            .arg("--")
-            .arg("--export-axioms")
-            .arg(&output_path)
-            .arg(&program_file)
+            .args(&args)
             .current_dir(&self.cobb_totem_dir)
             .output()
             .map_err(|e| format!("Failed to run cargo: {}", e))?;
 
         if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-            let formatted_err = Self::format_output(&stderr);
-            eprintln!("Axiom generation failed:\n{}", formatted_err);
-            self.print_debug_command(
-                "cargo",
-                &[
-                    "run",
-                    "--release",
-                    "--",
-                    "--export-axioms",
-                    &output_path.to_string_lossy(),
-                    &program_file.to_string_lossy(),
-                ],
-                &self.cobb_totem_dir,
-            );
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            eprintln!("Axiom generation failed:\n{}", Self::format_output(&stderr));
+            eprintln!("\n❌ To debug, run:\n{}", cmd_debug);
             return Err("Axiom generation failed (see output above)".to_string());
         }
 
@@ -210,28 +147,28 @@ impl TestEnv {
         Ok(())
     }
 
-    fn run_typecheck(&self, program_file: &Path, meta_config: &Path) -> Result<(), String> {
-        use std::process::Stdio;
-
+    /// Run `opam exec -- dune exec -- bin/main.exe <subcommand> <meta_config> <program_file>`
+    /// inside Cobb's `underapproximation_type/`. If `success_marker` is set, the
+    /// subcommand exiting 0 isn't enough — its stdout or stderr must also contain
+    /// that string (used to distinguish `subtype-check` true vs. false verdicts).
+    fn run_cobb_subcommand(
+        &self,
+        subcommand: &str,
+        meta_config: &Path,
+        program_file: &Path,
+        success_marker: Option<&str>,
+    ) -> Result<(), String> {
         let underapprox_dir = self.cobb_dir.join("underapproximation_type");
-
-        let cmd_debug = format!(
-            "cd {} && opam exec -- dune exec -- bin/main.exe type-check {} {}",
-            underapprox_dir.display(),
-            meta_config.display(),
-            program_file.display()
-        );
+        let meta_str = meta_config.to_string_lossy();
+        let prog_str = program_file.to_string_lossy();
+        let args: Vec<&str> = vec![
+            "exec", "--", "dune", "exec", "--", "bin/main.exe",
+            subcommand, &meta_str, &prog_str,
+        ];
+        let cmd_debug = Self::debug_hint("opam", &args, &underapprox_dir);
 
         let child = Command::new("opam")
-            .arg("exec")
-            .arg("--")
-            .arg("dune")
-            .arg("exec")
-            .arg("--")
-            .arg("bin/main.exe")
-            .arg("type-check")
-            .arg(&meta_config)
-            .arg(&program_file)
+            .args(&args)
             .current_dir(&underapprox_dir)
             .env("TOTEM_DUMP_LEAN", "1")
             .stdout(Stdio::piped())
@@ -248,228 +185,112 @@ impl TestEnv {
             })?;
 
         let output = Self::wait_with_timeout(child, COMMAND_TIMEOUT_SECS, &cmd_debug)?;
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
 
         if !output.status.success() {
-            let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
             let formatted_out = Self::format_output(&stdout);
-            let formatted_err = Self::format_output(&stderr);
             if !formatted_out.trim().is_empty() {
-                eprintln!("Type checking stdout:\n{}", formatted_out);
+                eprintln!("{} stdout:\n{}", subcommand, formatted_out);
             }
-            eprintln!("Type checking failed:\n{}", formatted_err);
-            self.print_debug_command(
-                "opam",
-                &[
-                    "exec",
-                    "--",
-                    "dune",
-                    "exec",
-                    "--",
-                    "bin/main.exe",
-                    "type-check",
-                    &meta_config.to_string_lossy(),
-                    &program_file.to_string_lossy(),
-                ],
-                &underapprox_dir,
-            );
-            return Err("Type checking failed (see output above)".to_string());
+            eprintln!("{} failed:\n{}", subcommand, Self::format_output(&stderr));
+            eprintln!("\n❌ To debug, run:\n{}", cmd_debug);
+            return Err(format!("{} failed (see output above)", subcommand));
+        }
+
+        if let Some(marker) = success_marker {
+            if !stdout.contains(marker) && !stderr.contains(marker) {
+                eprintln!(
+                    "{} exited 0 but '{}' not found in output",
+                    subcommand, marker
+                );
+                eprintln!("stdout:\n{}", Self::format_output(&stdout));
+                eprintln!("stderr:\n{}", Self::format_output(&stderr));
+                eprintln!("\n❌ To debug, run:\n{}", cmd_debug);
+                return Err(format!(
+                    "{} missing expected '{}' output",
+                    subcommand, marker
+                ));
+            }
         }
 
         Ok(())
     }
 
+    fn run_typecheck(&self, program_file: &Path, meta_config: &Path) -> Result<(), String> {
+        self.run_cobb_subcommand("type-check", meta_config, program_file, None)
+    }
+
     fn run_subtypecheck(&self, program_file: &Path, meta_config: &Path) -> Result<(), String> {
-        use std::process::Stdio;
+        self.run_cobb_subcommand(
+            "subtype-check",
+            meta_config,
+            program_file,
+            Some("Result: true"),
+        )
+    }
 
-        let underapprox_dir = self.cobb_dir.join("underapproximation_type");
+    /// Run `cargo run --manifest-path totem_runner/Cargo.toml -- <subcommand> <variant>`
+    /// from the repo root against the conventional
+    /// `integration_tests/<test_name>/<test_name>_gen_synth_prog<n>.ml` variant.
+    fn run_totem_subcommand(
+        &self,
+        subcommand: &str,
+        test_name: &str,
+        variant_num: u32,
+    ) -> Result<(), String> {
+        let test_dir = self
+            .repo_root
+            .join(format!("integration_tests/{}", test_name));
+        let variant_file =
+            test_dir.join(format!("{}_gen_synth_prog{}.ml", test_name, variant_num));
 
-        let cmd_debug = format!(
-            "cd {} && opam exec -- dune exec -- bin/main.exe subtype-check {} {}",
-            underapprox_dir.display(),
-            meta_config.display(),
-            program_file.display()
-        );
-
-        let child = Command::new("opam")
-            .arg("exec")
-            .arg("--")
-            .arg("dune")
-            .arg("exec")
-            .arg("--")
-            .arg("bin/main.exe")
-            .arg("subtype-check")
-            .arg(&meta_config)
-            .arg(&program_file)
-            .current_dir(&underapprox_dir)
-            .env("TOTEM_DUMP_LEAN", "1")
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|e| {
-                format!(
-                    "Failed to run dune via opam: {} (cwd: {}, config: {}, program: {})",
-                    e,
-                    underapprox_dir.display(),
-                    meta_config.display(),
-                    program_file.display()
-                )
-            })?;
-
-        let output = Self::wait_with_timeout(child, COMMAND_TIMEOUT_SECS, &cmd_debug)?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-            let formatted_err = Self::format_output(&stderr);
-            eprintln!("Subtype checking failed:\n{}", formatted_err);
-            self.print_debug_command(
-                "opam",
-                &[
-                    "exec",
-                    "--",
-                    "dune",
-                    "exec",
-                    "--",
-                    "bin/main.exe",
-                    "subtype-check",
-                    &meta_config.to_string_lossy(),
-                    &program_file.to_string_lossy(),
-                ],
-                &underapprox_dir,
-            );
-            return Err("Subtype checking failed (see output above)".to_string());
+        if !variant_file.exists() {
+            return Err(format!(
+                "{} variant not found: {}",
+                subcommand,
+                variant_file.display()
+            ));
         }
 
-        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        let manifest = self.repo_root.join("totem_runner/Cargo.toml");
+        let manifest_str = manifest.to_string_lossy();
+        let variant_str = variant_file.to_string_lossy();
+        let args: Vec<&str> = vec![
+            "run", "--manifest-path", &manifest_str, "--", subcommand, &variant_str,
+        ];
+        let cmd_debug = Self::debug_hint("cargo", &args, &self.repo_root);
 
-        if !stdout.contains("Result: true") && !stderr.contains("Result: true") {
-            eprintln!("Subtype check passed but 'Result: true' not found in output");
-            eprintln!("stdout:\n{}", Self::format_output(&stdout));
-            eprintln!("stderr:\n{}", Self::format_output(&stderr));
-            self.print_debug_command(
-                "opam",
-                &[
-                    "exec",
-                    "--",
-                    "dune",
-                    "exec",
-                    "--",
-                    "bin/main.exe",
-                    "subtype-check",
-                    &meta_config.to_string_lossy(),
-                    &program_file.to_string_lossy(),
-                ],
-                &underapprox_dir,
+        let output = Command::new("cargo")
+            .args(&args)
+            .current_dir(&self.repo_root)
+            .output()
+            .map_err(|e| format!("Failed to run cargo: {}", e))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            eprintln!(
+                "{} failed for variant {}:\n{}",
+                subcommand,
+                variant_num,
+                Self::format_output(&stderr)
             );
-            return Err("Subtype check missing expected 'Result: true' output".to_string());
+            eprintln!("\n❌ To debug, run:\n{}", cmd_debug);
+            return Err(format!(
+                "{} failed for variant {} (see output above)",
+                subcommand, variant_num
+            ));
         }
 
         Ok(())
     }
 
     fn run_abduction(&self, test_name: &str, variant_num: u32) -> Result<(), String> {
-        let test_dir = self
-            .repo_root
-            .join(format!("integration_tests/{}", test_name));
-        let variant_file = test_dir.join(format!("{}_gen_synth_prog{}.ml", test_name, variant_num));
-
-        if !variant_file.exists() {
-            return Err(format!(
-                "Abduction variant not found: {}",
-                variant_file.display()
-            ));
-        }
-
-        let output = Command::new("cargo")
-            .arg("run")
-            .arg("--manifest-path")
-            .arg(self.repo_root.join("totem_runner/Cargo.toml"))
-            .arg("--")
-            .arg("abduction")
-            .arg(&variant_file)
-            .current_dir(&self.repo_root)
-            .output()
-            .map_err(|e| format!("Failed to run cargo: {}", e))?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-            let formatted_err = Self::format_output(&stderr);
-            eprintln!(
-                "Abduction failed for variant {}:\n{}",
-                variant_num, formatted_err
-            );
-            self.print_debug_command(
-                "cargo",
-                &[
-                    "run",
-                    "--manifest-path",
-                    "totem_runner/Cargo.toml",
-                    "--",
-                    "abduction",
-                    &variant_file.to_string_lossy(),
-                ],
-                &self.repo_root,
-            );
-            return Err(format!(
-                "Abduction failed for variant {} (see output above)",
-                variant_num
-            ));
-        }
-
-        Ok(())
+        self.run_totem_subcommand("abduction", test_name, variant_num)
     }
 
     fn run_synthesis(&self, test_name: &str, variant_num: u32) -> Result<(), String> {
-        let test_dir = self
-            .repo_root
-            .join(format!("integration_tests/{}", test_name));
-        let variant_file = test_dir.join(format!("{}_gen_synth_prog{}.ml", test_name, variant_num));
-
-        if !variant_file.exists() {
-            return Err(format!(
-                "Synthesis variant not found: {}",
-                variant_file.display()
-            ));
-        }
-
-        let output = Command::new("cargo")
-            .arg("run")
-            .arg("--manifest-path")
-            .arg(self.repo_root.join("totem_runner/Cargo.toml"))
-            .arg("--")
-            .arg("synthesis")
-            .arg(&variant_file)
-            .current_dir(&self.repo_root)
-            .output()
-            .map_err(|e| format!("Failed to run cargo: {}", e))?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-            let formatted_err = Self::format_output(&stderr);
-            eprintln!(
-                "Synthesis failed for variant {}:\n{}",
-                variant_num, formatted_err
-            );
-            self.print_debug_command(
-                "cargo",
-                &[
-                    "run",
-                    "--manifest-path",
-                    "totem_runner/Cargo.toml",
-                    "--",
-                    "synthesis",
-                    &variant_file.to_string_lossy(),
-                ],
-                &self.repo_root,
-            );
-            return Err(format!(
-                "Synthesis failed for variant {} (see output above)",
-                variant_num
-            ));
-        }
-
-        Ok(())
+        self.run_totem_subcommand("synthesis", test_name, variant_num)
     }
 }
 

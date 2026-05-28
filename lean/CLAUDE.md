@@ -8,23 +8,25 @@ The Lake package is defined at `../lakefile.lean`. Three `lean_lib`s live
 under `srcDir := "lean"`:
 
 - `ProofAutomation` (root `ProofAutomation`) — the tactic library.
-- `test_rbtree_typecheck_timeout` (root `test_rbtree_typecheck_timeout`) —
-  one specific failed subtyping query, exposed as a lib so other files
-  can import it.
+- `Scenarios` (roots `Scenarios.test*`) — end-to-end scenario files:
+  failed subtyping query dumps from Cobb plus targeted tactic-stack
+  experiments. Built on every `lake build` so tactic regressions surface
+  in CI instead of rotting silently.
 - `Tests` (root `Tests`) — the regression test suite, run via
   `lake test`.
 
-Toolchain: `../lean-toolchain` (currently Lean v4.28.0). The package
-requires `plausible` from git (currently pinned at `v4.28.0`).
+Toolchain pin lives at `../lean-toolchain`. The package requires
+`plausible` from git (currently pinned at `v4.28.0`).
 
 ## Layout
 
 - `ProofAutomation.lean` — umbrella import (re-exports every submodule).
 - `ProofAutomation/` — library source. One module per tactic/command.
-- `test*.lean` — failed subtyping query dumps from Cobb (mostly with
-  `sorry` in places where the proof got stuck). Most are scratch — only
-  `test_rbtree_typecheck_timeout.lean` is currently exposed as a
-  buildable lib (so PBT can `import` it).
+- `Scenarios/` — end-to-end scenario files (subtyping-query dumps and
+  tactic experiments), built by `lake build` via the `Scenarios` lib.
+  See `lakefile.lean` for the roster.
+- `test*.lean` at the `lean/` root — scratch files with open `sorry`s.
+  Not built by CI; promote to `Scenarios/` once the `sorry` is closed.
 - `Tests/` — regression tests for the tactics in `ProofAutomation/`,
   run via `lake test`. Treat as the canonical usage examples. See the
   "Test suite" section below for the per-module breakdown.
@@ -36,7 +38,7 @@ low-priority `Shrinkable` fallback used by every PBT-running file. Two
 entry points consume it:
 
 - **`Tests/PBT.lean`** — the regression suite: four `#guard_msgs (error)`
-  examples mirroring `sorry` sites in `test_rbtree_typecheck_timeout.lean`.
+  examples mirroring `sorry` sites in `Scenarios/test_rbtree_typecheck_timeout.lean`.
   Uses `Plausible.Configuration.quiet := true` so the asserted error is
   the deterministic `Found a counter-example!`.
 - **`ProofAutomation/ProposeCounterexample.lean`** — the tactic: runs PBT
@@ -93,17 +95,15 @@ Each tactic lives in its own file under `ProofAutomation/`. All depend on
 After editing any `.lean` file under this directory, verify it builds
 before claiming the change is correct (per the root CLAUDE.md).
 
-```bash
-# Run the full regression suite (canonical).
-lake test                                         # builds the `Tests` lib
+General lake workflow lives in the `lean4-lake-project` skill.
+Project-specific targets:
 
-# Targeted library builds (from repo root)
+```bash
+lake test                                         # canonical: builds the `Tests` lib
 lake build ProofAutomation
 lake build Tests.ProveAxiom                       # one test module
-lake build test_rbtree_typecheck_timeout
-
-# Single-file check (works for scratch test files not exposed as libs)
-lake env lean lean/ProofAutomation/SimpHyps.lean
+lake build Scenarios                              # all scenario files
+lake build Scenarios.test_rbtree_typecheck_timeout
 ```
 
 The `lean-lsp` MCP tools (`lean_diagnostic_messages`, `lean_goal`,

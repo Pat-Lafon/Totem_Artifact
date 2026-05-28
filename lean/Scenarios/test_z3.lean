@@ -31,11 +31,12 @@ def depth : itree → Int → Prop
   | .Leaf, n => n = 0
   | .Node _ l r, n => ∃ dl dr : Int, depth l dl ∧ depth r dr ∧ n = 1 + max dl dr
 
-section Axioms
+namespace Axioms
   attribute [local simp] is_leaf is_node value left right depth
   attribute [local grind cases] itree Bool
   attribute [local grind =] is_leaf is_node value left right depth
 end Axioms
+open Axioms
 
 -- ============================================================
 -- Part 1: Z3 datatype translation unit tests (MyList)
@@ -94,6 +95,8 @@ z3! z3_should_fail only []
 -- Part 2: Depth-tree axioms (shared by subtyping checks #0 and #146)
 -- ============================================================
 
+namespace Axioms
+
 axiom ax_0 : ∀ (t : itree), (∀ (n : Int), ((depth t n) → (n >= 0)))
 axiom ax_1 : ∀ (t : itree), (∀ (res : Int), ((depth t res) → ((is_leaf t) → (0 == res))))
 axiom ax_2 : ∀ (t : itree), (∀ (res : Int), ((is_leaf t) → ((0 == res) → (depth t res))))
@@ -116,6 +119,8 @@ axiom ax_16 : ∀ (t : itree), (∀ (v : Int), (∀ (l : itree), (∀ (r : itree
 axiom ax_proposed : ∀ (t : itree), (∀ (v : Int), (∀ (l : itree), (∀ (r : itree), (∀ (res : Int), ((depth t res) → (((is_node t) ∧ (((value t) == v) ∧ (((left t) == l) ∧ ((right t) == r)))) → (∃ (res_0 : Int), (∃ (res_1 : Int), ((((depth l res_0) ∧ (depth r res_1) ∧ res_0 < res ∧ res_1 < res )))))))))))
 axiom ax_6_proposed : ∀ (t : itree), (∀ (v : Int), (∀ (l : itree), (∀ (r : itree), (∀ (res_0 : Int), (∀ (res_1 : Int), (((is_node t) ∧ (((value t) == v) ∧ (((left t) == l) ∧ ((right t) == r)))) → ((( ((depth l res_0) ∧ ((depth r res_1) ∧ (res_0 > res_1)))) → ((depth l res_0) → (∃ (res : Int), (((1 + res_0) == res) ∧ (depth t res))))))))))))
 axiom ax_9_proposed : ∀ (t : itree), (∀ (v : Int), (∀ (l : itree), (∀ (r : itree), (∀ (res_0 : Int), (∀ (res_1 : Int), (((is_node t) ∧ (((value t) == v) ∧ (((left t) == l) ∧ ((right t) == r)))) → ((((depth l res_0) ∧ ((depth r res_1) ∧ ¬(res_0 > res_1))) ∧ (depth r res_1)) → (∃ (res : Int), ((1 + res_1) == res) ∧ (depth t res)))))))))
+
+end Axioms
 
 -- ============================================================
 -- Part 3: Failed subtyping check #0

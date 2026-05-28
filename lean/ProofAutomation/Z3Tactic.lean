@@ -133,6 +133,14 @@ structure TransState where
   `(! body :qid <currentQid>)` so Z3's trace output groups all quantifier
   instantiations under the user-axiom name instead of `k!N`. -/
   currentQid : Option String := none
+  /-- Every top-level SMT symbol the translator declares (datatype names,
+  constructor names, selector names, declared sorts, uninterpreted-function
+  names). Quantifier binders are checked against this set so a Lean theorem
+  binder named `color` won't shadow the `irbtree.Rbtnode` selector `color`
+  inside the emitted SMT — Z3 silently rebinds the inner reference and
+  rejects the resulting term with a cryptic "select requires 0 arguments"
+  message at the call site, not at the offending binder. -/
+  declaredSymbols : Std.HashSet String := {}
 
 abbrev TransM := StateT TransState MetaM
 
@@ -143,11 +151,18 @@ private def withQid {α : Type} (qid : Option String) (action : TransM α) : Tra
   try action
   finally modify fun st => { st with currentQid := prev }
 
-private def addSort (s : String) : TransM Unit :=
+/-- Register `s` as a name declared at the top level of the emitted SMT.
+    See `TransState.declaredSymbols`. -/
+private def addDeclaredSymbol (s : String) : TransM Unit :=
+  modify fun st => { st with declaredSymbols := st.declaredSymbols.insert s }
+
+private def addSort (s : String) : TransM Unit := do
   if s == "Int" || s == "Bool" then pure ()
-  else modify fun st =>
-    if st.customSorts.contains s then st
-    else { st with customSorts := st.customSorts.push s }
+  else
+    addDeclaredSymbol s
+    modify fun st =>
+      if st.customSorts.contains s then st
+      else { st with customSorts := st.customSorts.push s }
 
 private def addFunc (name : String) (argSorts : Array String) (retSort : String) : TransM Unit := do
   let st ← get
@@ -155,6 +170,7 @@ private def addFunc (name : String) (argSorts : Array String) (retSort : String)
     if existArgs != argSorts || existRet != retSort then
       throwError s!"z3 addFunc: conflicting signatures for '{name}': ({existArgs} → {existRet}) vs ({argSorts} → {retSort})"
   else
+    addDeclaredSymbol name
     modify fun st => { st with funDecls := st.funDecls.push (name, argSorts, retSort) }
 
 -- ============================================================
@@ -214,6 +230,11 @@ private partial def registerDatatype (dtName : String) (_name : Name) (val : Ind
           (sort '{field.sort}'); SMT-LIB requires per-datatype selector uniqueness."
       | none =>
         seen := seen.insert field.name (ctor.name, field.sort)
+  addDeclaredSymbol dtName
+  for ctor in ctors do
+    addDeclaredSymbol ctor.name
+    for field in ctor.fields do
+      addDeclaredSymbol field.name
   modify fun st => { st with datatypes := st.datatypes.push { name := dtName, ctors } }
 
 /-- Extract field names and sorts from a constructor type, skipping the first
@@ -511,6 +532,12 @@ private partial def toSmt (bv : List String) (e : Expr) : TransM String := do
         the same SMT symbol; emitting both would let Z3 bind the inner reference to the wrong \
         quantifier. Rename one of the binders before invoking the tactic, or extend \
         `sanitizeBinderName` with a depth suffix when collisions become common."
+    if (← get).declaredSymbols.contains nm then
+      throwError m!"z3 toSmt: forall binder `{nm}` shadows a top-level SMT symbol of the same \
+        name (datatype, constructor, selector, declared sort, or uninterpreted function). \
+        Z3 would silently rebind the inner reference to the binder, then fail at the call site \
+        with an unhelpful arity/sort message (typically 'select requires 0 arguments'). \
+        Rename the binder in the source theorem to a non-colliding name."
     let b ← toSmt (nm :: bv) body
     let bAnnotated ← do
       match (← get).currentQid with
@@ -569,6 +596,12 @@ where
               reference to the wrong quantifier. Rename one of the binders before invoking the \
               tactic, or extend `sanitizeBinderName` with a depth suffix when collisions become \
               common."
+          if (← get).declaredSymbols.contains nmStr then
+            throwError m!"z3 toSmt: exists binder `{nmStr}` shadows a top-level SMT symbol of \
+              the same name (datatype, constructor, selector, declared sort, or uninterpreted \
+              function). Z3 would silently rebind the inner reference to the binder, then fail \
+              at the call site with an unhelpful arity/sort message (typically 'select requires \
+              0 arguments'). Rename the binder in the source theorem to a non-colliding name."
           let b ← toSmt (nmStr :: bv) body
           return s!"(exists (({nmStr} {s})) {b})"
         | _ => throwError "z3: Exists without lambda body"
@@ -863,6 +896,13 @@ private def runZ3 (query : String) (parseCores : Bool := false) : IO Z3Output :=
   let verdictLine? := allLines.find? fun l => !isErrorLine l && !isBlankLine l
   let stderrTrimmed := r.stderr.trimAscii.toString
   let stderrInfo := if stderrTrimmed.isEmpty then "" else s!"\nstderr: {stderrTrimmed}"
+  -- Z3's most actionable diagnostic is the `(error ...)` line on stdout, not
+  -- stderr — include it in every error path so the caller doesn't have to
+  -- open the SMT file to find out what went wrong.
+  let errorLinesInfo :=
+    if errorLines.isEmpty then ""
+    else s!"\nZ3 stdout error(s) ({errorLines.length}):\n  " ++
+      "\n  ".intercalate (errorLines.map fun l => l.trimAscii.toString)
   -- Both non-zero exit and non-empty stderr are fatal-before-verdict: any
   -- stdout verdict is unreliable. Z3 emits `WARNING: unknown logic` to stderr
   -- with exit 0, which would otherwise let an unrelated `unsat` slip through.
@@ -871,17 +911,17 @@ private def runZ3 (query : String) (parseCores : Bool := false) : IO Z3Output :=
       let verdictHint := match verdictLine? with
         | some line => s!" (stdout verdict: '{line.trimAscii.toString}')"
         | none      => ""
-      Z3Result.error s!"Z3 exited non-zero (exit code {r.exitCode}){verdictHint}{stderrInfo}"
+      Z3Result.error s!"Z3 exited non-zero (exit code {r.exitCode}){verdictHint}{errorLinesInfo}{stderrInfo}"
     else if !stderrTrimmed.isEmpty then
       let verdictHint := match verdictLine? with
         | some line => s!" (stdout verdict: '{line.trimAscii.toString}')"
         | none      => ""
-      Z3Result.error s!"Z3 wrote to stderr (treated as fatal){verdictHint}{stderrInfo}"
+      Z3Result.error s!"Z3 wrote to stderr (treated as fatal){verdictHint}{errorLinesInfo}{stderrInfo}"
     else if !errorLines.isEmpty then
-      -- Z3 told us the query is malformed. This is fatal-before-verdict;
+      -- Exit 0 but Z3 still reported errors on stdout — malformed query the
+      -- solver didn't consider fatal enough to bail on. Fatal-before-verdict;
       -- never collapse into `unknown`.
-      let joined := "\n".intercalate errorLines
-      Z3Result.error s!"Z3 reported {errorLines.length} error(s) in the generated query:\n{joined}{stderrInfo}"
+      Z3Result.error s!"Z3 reported errors in the generated query (exit 0, but stdout had error lines).{errorLinesInfo}{stderrInfo}"
     else
       match verdictLine? with
       | none =>
@@ -902,12 +942,16 @@ private def runZ3 (query : String) (parseCores : Bool := false) : IO Z3Output :=
   -- *immediately following* `unsat`, not scanned freely (which would pick up
   -- unrelated s-exprs like `(error: …)` as bogus core names). Shape-check
   -- the candidate so non-cores fail loudly.
+  -- `()` is a legitimate response — Z3 derived `unsat` without needing any
+  -- `:named` assertion. Since `buildQuery` doesn't `:named`-wrap the negated
+  -- goal, an empty core means "no axiom was touched" (e.g. theory reasoning
+  -- on the negated goal alone, or unsat via preprocessing). Accept empty,
+  -- shape-reject only truly malformed responses.
   let isCoreShape (s : String) : Bool := Id.run do
     let t := s.trimAscii.toString
     if !(t.startsWith "(" && t.endsWith ")") then return false
     let body := ((t.toRawSubstring.drop 1).dropRight 1).toString
     let toks := body.splitOn " " |>.filter (· ≠ "")
-    if toks.isEmpty then return false
     return toks.all fun tok => tok.all fun c => c ≠ ' ' && c ≠ ')'
   let (result, usedAxioms) : Z3Result × Option (Array Name) :=
     match result, parseCores with
@@ -930,13 +974,12 @@ private def runZ3 (query : String) (parseCores : Bool := false) : IO Z3Output :=
           (Z3Result.error s!"Z3 returned 'unsat' but the (get-unsat-core) line is malformed: {msg}",
            none)
         | .ok parsed =>
-          -- An empty core line is suspicious — Z3 should at minimum list the
-          -- negated goal's :named handle if cores were enabled and unsat held.
-          if parsed.isEmpty then
-            (Z3Result.error s!"Z3 returned 'unsat' but the (get-unsat-core) line parsed to no names: '{line.trimAscii.toString}'",
-             none)
-          else
-            (.unsat, some parsed)
+          -- An empty `()` core is legitimate: the negated goal isn't
+          -- `:named`-wrapped in buildQuery, so when Z3 closes the query
+          -- without touching any named axiom (theory contradiction on the
+          -- negated goal alone, or preprocessing-time discharge) the core
+          -- is empty by construction. Surface it verbatim.
+          (.unsat, some parsed)
       | none =>
         (Z3Result.error
           s!"Z3 returned 'unsat' but produced no (get-unsat-core) response. \

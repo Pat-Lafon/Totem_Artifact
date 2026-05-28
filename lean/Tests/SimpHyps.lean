@@ -28,18 +28,19 @@ theorem test_simp_hyps_and : ∀ (a b : Prop), a ∧ b → a := by
   simp_hyps
   assumption
 
--- Normalizes BEq.
+-- Normalizes BEq, then subst's `n := 0` (numeric literal qualifies as "simple"
+-- for tryNormalize's subst gate via the OfNat-app recognizer).
 theorem test_simp_hyps_beq : ∀ (n : Int), (n == 0) = true → n = 0 := by
   intros n h
   simp_hyps
-  assumption
+  rfl
 
 -- Normalizes flipped BEq (lit on LHS). Regression for the `eq_comm` fix
 -- that lets `simp only` make progress on `true = (a == b)` / `false = (a == b)`.
 theorem test_simp_hyps_beq_flipped_true : ∀ (n : Int), true = (n == 0) → n = 0 := by
   intros n h
   simp_hyps
-  assumption
+  rfl
 
 theorem test_simp_hyps_beq_flipped_false : ∀ (n : Int), false = (n == 0) → n ≠ 0 := by
   intros n h
@@ -96,6 +97,17 @@ theorem test_simp_hyps_rejects_unfold_on_fvar (v : irbtree)
   simp_hyps
   exact h
 
+-- `safeForSimp` still rejects the hypothesis (it mentions `is_rbtnode v`),
+-- but the narrow logical-connective fallback collapses the `true = true ∧ _ ∨
+-- ¬true = true ∧ _` skeleton without unfolding any def. Mirrors the residue
+-- left after `intros` on Cobb-dumped subtyping queries (depth_gen_spec).
+theorem test_simp_hyps_logical_fallback_under_fvar_unfold
+    (v : irbtree)
+    (h : true = true ∧ is_rbtnode v = true ∨ ¬true = true ∧ False) :
+    is_rbtnode v = true := by
+  simp_hyps
+  exact h
+
 -- Recursive `@[simp]` def (structural recursion, compiled via
 -- `irbtree.brecOn`) → rejected even when the principal arg is a
 -- constructor, because one unfold step exposes recursive calls on `l`/`r`
@@ -106,6 +118,37 @@ theorem test_simp_hyps_rejects_recursive_simp_def
     num_black_impl (irbtree.Rbtnode c l val r) n = true := by
   simp_hyps
   exact h
+
+-- Resolves an `ite` in a hypothesis when another hyp pins the condition.
+-- `h_lt : a < b` flips to defeq-match the ite's `b > a` condition; `if_pos`
+-- collapses `h1` to the then-branch.
+theorem test_simp_hyps_ite_pos (a b : Int) (h_lt : a < b)
+    (h1 : (if b > a then 1 + b else 1 + a) = 0) :
+    1 + b = 0 := by
+  simp_hyps
+  exact h1
+
+-- Negative-condition counterpart: `h_le : a ≤ b` lets `simp_hyps` discharge
+-- `if a > b` via `if_neg`, collapsing to the else-branch.
+theorem test_simp_hyps_ite_neg (a b : Int) (h_le : a ≤ b)
+    (h1 : (if a > b then 1 + a else 1 + b) = 0) :
+    1 + b = 0 := by
+  simp_hyps
+  exact h1
+
+-- Clears a hypothesis implied by the rest of the lctx. Neither
+-- `0 ≤ h - 1 + (h - 1) + 1` nor `h - 1 + (h - 1) + 1 < h + h` are tautologies
+-- in isolation (both fail at `h = 0`), but both follow from `h > 0`. The
+-- empty-context probe in `tryClearTrivial` rejects them; `tryClearRedundant`
+-- catches them via `grind` against the rest of the context.
+set_option linter.unusedVariables false in
+theorem test_simp_hyps_clear_redundant_arith (h : Int) (hpos : h > 0)
+    (hred_lo : 0 ≤ h - 1 + (h - 1) + 1) (hred_hi : h - 1 + (h - 1) + 1 < h + h) :
+    h > 0 := by
+  simp_hyps
+  fail_if_success exact hred_lo
+  fail_if_success exact hred_hi
+  exact hpos
 
 end Tests.SimpHyps
 
@@ -135,5 +178,17 @@ end Tests.SimpHyps
 /-- info: 'Tests.SimpHyps.test_simp_hyps_rejects_unfold_on_fvar' does not depend on any axioms -/
 #guard_msgs in #print axioms Tests.SimpHyps.test_simp_hyps_rejects_unfold_on_fvar
 
+/-- info: 'Tests.SimpHyps.test_simp_hyps_logical_fallback_under_fvar_unfold' depends on axioms: [propext] -/
+#guard_msgs in #print axioms Tests.SimpHyps.test_simp_hyps_logical_fallback_under_fvar_unfold
+
 /-- info: 'Tests.SimpHyps.test_simp_hyps_rejects_recursive_simp_def' does not depend on any axioms -/
 #guard_msgs in #print axioms Tests.SimpHyps.test_simp_hyps_rejects_recursive_simp_def
+
+/-- info: 'Tests.SimpHyps.test_simp_hyps_clear_redundant_arith' depends on axioms: [propext] -/
+#guard_msgs in #print axioms Tests.SimpHyps.test_simp_hyps_clear_redundant_arith
+
+/-- info: 'Tests.SimpHyps.test_simp_hyps_ite_pos' depends on axioms: [propext] -/
+#guard_msgs in #print axioms Tests.SimpHyps.test_simp_hyps_ite_pos
+
+/-- info: 'Tests.SimpHyps.test_simp_hyps_ite_neg' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in #print axioms Tests.SimpHyps.test_simp_hyps_ite_neg

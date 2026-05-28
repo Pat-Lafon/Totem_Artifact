@@ -43,7 +43,7 @@ section TestProposeAxiom
 
   -- Nested-constructor shape: hypothesis and goal both mention
   -- `Rbtnode true (Rbtnode c l v r) v' r'`. Reproducer for
-  -- test_rbtree_typecheck_timeout.lean:390.
+  -- Scenarios/test_rbtree_typecheck_timeout.lean:390.
   theorem test_propose_nested_accessor (v' : Int) (r' : irbtree) (c : Bool) (l : irbtree) (v : Int) (r : irbtree)
       (h_16 : no_red_red (irbtree.Rbtnode true (irbtree.Rbtnode c l v r) v' r') true) :
       no_red_red (irbtree.Rbtnode c l v r) true := by

@@ -5,46 +5,42 @@ on:
     branches: [master]
   pull_request:
 
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  lake-test:
-    name: lake test (Lean ${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
+  lean:
+    name: ${{ matrix.target.name }}
+    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest]
+        target:
+          - { name: "Tests",     cmd: "lake test" }
+          - { name: "Scenarios", cmd: "lake build Scenarios" }
     timeout-minutes: 30
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        # No submodules: `Tests/` only depends on the Lean side. Cobb /
-        # Cobb_Totem (the submodules) have their own builds and should be
-        # gated by a separate workflow when added.
 
-      # Z3 — required by Tests.Z3Local. The project's prerequisites pin
-      # 4.15.1 for Cobb/totem_runner, but Tests.Z3Local exercises only
-      # trivial linear arithmetic and Bool cases, which any modern Z3
-      # closes. apt is the simplest install; bump to upstream 4.15.1
-      # download if/when a heavier Z3 test lands here.
       - name: Install Z3
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends z3
           z3 --version
 
-      # leanprover/lean-action reads `lean-toolchain` (currently v4.28.0),
-      # installs elan + the matching Lean, and runs `lake build` then
-      # `lake test` (because of `test: true`). `lake test` builds the
-      # `Tests` lib via `package.testDriver := "Tests"` in `lakefile.lean`
-      # — every `#guard_msgs` assertion fires during that build.
-      - name: Build + test
+      - name: Install Lean toolchain
         uses: leanprover/lean-action@v1
         with:
-          test: true
+          build: false
+          test: false
           lint: false
           use-mathlib-cache: false
+
+      - name: ${{ matrix.target.name }}
+        run: ${{ matrix.target.cmd }}

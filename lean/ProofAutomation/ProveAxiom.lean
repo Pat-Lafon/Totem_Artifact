@@ -7,7 +7,13 @@ open Lean Elab Tactic Meta
 
 Strategies are tried in order, cheapest first. Each backtracks on failure.
 
-1. **grind**: flatten goal (intro all + destruct ∧/∃), then grind.
+0. **intro-only + grind**: flatten foralls *without* refining existentials,
+   then grind. Handles `… → ∃ x, P[x] → Q[x]` shapes where the implication
+   premise pins the witness — eager `refine ⟨_, ?_⟩` (used by later
+   strategies) would commit `x` to a metavariable before the premise is
+   intro'd.
+1. **grind**: flatten goal (intro all + destruct ∧/∃, refine ⟨_, ?_⟩ for
+   leading ∃), then grind.
 2. **simp_all + grind**: same, but simp_all first to unfold wrappers in
    hypotheses so grind's E-matching triggers fire on the impl-level terms.
 3. **cases + simp_all + grind**: flatten, case-split each inductive variable,
@@ -34,6 +40,10 @@ def proveAxiomImpl : TacticM Unit := do
       then return true
     return false
   let flatNoExists : TacticM Unit := flattenGoal (refineExists := false)
+  -- Strategy 0: intro-only flatten + grind (leave existentials for grind)
+  if ← withBacktrack do
+    flatNoExists; evalTactic (← `(tactic| all_goals grind (splits := 20)))
+  then return
   -- Strategy 1: flatten + grind
   if ← tryGlobal (← `(tactic| all_goals grind (splits := 20))) then return
   -- Strategy 2: flatten + simp_all + grind

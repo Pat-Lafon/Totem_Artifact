@@ -11,6 +11,15 @@ open Lean Elab Tactic Meta
   closes whatever remains with `grind`.
 
   Phases (in order):
+    - `trySimpUnfold`      — on `∃` goals only, `dsimp` using the in-scope
+                             `@[simp]` set so pinning equalities hidden
+                             inside predicate defs (e.g. `depth l res` ≡
+                             `depth_impl l = res`) become syntactically
+                             visible to `refine_exists_eq`. Gated by the
+                             outer connective so downstream tooling that
+                             expects folded hypotheses (e.g.
+                             `propose_axiom`'s OCaml pretty-printer) is
+                             not perturbed on non-existential sites.
     - `trySimpIdentities`  — collapse `P ∨ False` / `False ∨ P` / `P ∧ True` /
                              `True ∧ P` so the structural phases below see
                              the simplified outermost connective
@@ -23,6 +32,11 @@ open Lean Elab Tactic Meta
   the `phases` array in `simpGoalOnce`. -/
 
 namespace ProofAutomation
+
+private def trySimpUnfold (target : Expr) : TacticM Bool := do
+  match_expr target with
+  | Exists _ _ => tryTacticStep (evalTactic (← `(tactic| dsimp)))
+  | _ => return false
 
 private def trySimpIdentities (_target : Expr) : TacticM Bool := do
   tryTacticStep (evalTactic
@@ -55,7 +69,7 @@ private def tryPickDisjunct (target : Expr) : TacticM Bool := do
 def simpGoalOnce : TacticM Bool := withMainContext do
   let target ← instantiateMVars (← getMainTarget)
   let phases : Array (Expr → TacticM Bool) :=
-    #[trySimpIdentities, tryAndIntro, tryRefineExistsEq, tryPickDisjunct]
+    #[trySimpUnfold, trySimpIdentities, tryAndIntro, tryRefineExistsEq, tryPickDisjunct]
   for phase in phases do
     if ← phase target then return true
   return false

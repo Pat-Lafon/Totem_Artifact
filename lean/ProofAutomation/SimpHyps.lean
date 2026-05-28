@@ -109,6 +109,83 @@ private def isCtorApp (env : Environment) (e : Expr) : Bool :=
     | _ => false
   | _ => false
 
+-- Strip outer lambdas, returning the inner body and the number stripped.
+private partial def stripOuterLambdas : Expr → Nat → Expr × Nat
+  | .lam _ _ body _, k => stripOuterLambdas body (k + 1)
+  | e, k => (e, k)
+
+/-! `paramScrutPositions n`: param positions of def `n` (0-indexed from
+the outermost lambda) whose values flow into a matcher scrutinee — either
+directly via a matcher app in `n`'s body, or transitively via a call to
+another `toUnfold` def whose body matches on the corresponding arg.
+Unfolding `n` applied to args produces a stuck matcher whenever any of
+these positions is non-ctor at the call site. Lambda/forall bodies are
+skipped: bvar indices inside those binders refer to fresh binders rather
+than the def's params, so static back-mapping isn't sound. -/
+
+mutual
+
+private partial def paramScrutPositionsAux
+    (env : Environment) (toUnfold : PHashSet Name)
+    (visited : Std.HashSet Name) (n : Name) : Std.HashSet Nat :=
+  if visited.contains n then {} else
+    let visited := visited.insert n
+    match env.find? n with
+    | some (.defnInfo ci) =>
+      let (inner, numLams) := stripOuterLambdas ci.value 0
+      collectScrutPositions env toUnfold visited numLams inner {}
+    | _ => {}
+
+private partial def collectScrutPositions
+    (env : Environment) (toUnfold : PHashSet Name) (visited : Std.HashSet Name)
+    (numLams : Nat) (e : Expr) (acc : Std.HashSet Nat) :
+    Std.HashSet Nat := Id.run do
+  let mut acc := acc
+  if e.isApp then
+    let head := e.getAppFn
+    let args := e.getAppArgs
+    if let .const m _ := head then
+      -- Direct matcher app: pick up scrutinees pointing at outer params.
+      if let some mInfo := getMatcherInfoCore? env m then
+        let lo := mInfo.getFirstDiscrPos
+        let hi := lo + mInfo.numDiscrs
+        if args.size ≥ hi then
+          for i in [lo:hi] do
+            if let .bvar j := args[i]! then
+              if j < numLams then
+                acc := acc.insert (numLams - 1 - j)
+      -- Transitive call to another toUnfold def: pull its scrut-prone
+      -- positions back to the enclosing def's param positions.
+      if toUnfold.contains m then
+        let inner := paramScrutPositionsAux env toUnfold visited m
+        for q in inner do
+          if h : q < args.size then
+            if let .bvar j := args[q] then
+              if j < numLams then
+                acc := acc.insert (numLams - 1 - j)
+    for arg in args do
+      acc := collectScrutPositions env toUnfold visited numLams arg acc
+    return acc
+  match e with
+  | .letE _ ty val body _ =>
+    acc := collectScrutPositions env toUnfold visited numLams ty acc
+    acc := collectScrutPositions env toUnfold visited numLams val acc
+    acc := collectScrutPositions env toUnfold visited numLams body acc
+    return acc
+  | .mdata _ inner =>
+    acc := collectScrutPositions env toUnfold visited numLams inner acc
+    return acc
+  | .proj _ _ inner =>
+    acc := collectScrutPositions env toUnfold visited numLams inner acc
+    return acc
+  | _ => return acc
+
+end
+
+private def paramScrutPositions
+    (env : Environment) (toUnfold : PHashSet Name) (n : Name) : Std.HashSet Nat :=
+  paramScrutPositionsAux env toUnfold {} n
+
 private def tryNormalize (d : LocalDecl) (ty : Expr) : TacticM Bool := do
   let hi := mkIdent d.userName
   -- Normalize BEq: `(x == y) = true/false` or `true/false = (x == y)` → `x = y` / `x ≠ y`
@@ -119,14 +196,42 @@ private def tryNormalize (d : LocalDecl) (ty : Expr) : TacticM Bool := do
       return true
   match_expr ty with
   | Eq _ lhs rhs =>
-    -- Substitute simple equalities (fvar = simple or simple = fvar). "Simple"
-    -- excludes unapplied user functions: `subst` is sound on `x = my_fn`, but
-    -- it inlines `my_fn` everywhere `x` appeared and the resulting goal is
-    -- usually harder for downstream `grind`. Restrict the const branch to
-    -- constructor heads (zero-arg ctors like `Nat.zero`, `Nil`, `true`).
+    -- Substitute equalities with an fvar on one side. The gate is asymmetric
+    -- by direction, keyed off Cobb's encoding convention:
+    --
+    --   * Inner numbered fvars appear on the *LHS* of `==`
+    --       e.g. `s_2 == (s - 1)`, `inv_1 == (inv - 1)`, `h_0 == (h - 1)`.
+    --     These BEq-normalize to `inner = arith`, and we want subst to
+    --     eliminate the inner var. So `fvar = expr` admits applications
+    --     (arithmetic, function apps).
+    --
+    --   * Outer user-quantified fvars appear on the *RHS* of `==`
+    --       e.g. `(h + h) == inv`, `((h + h) + 1) == inv`.
+    --     These BEq-normalize to `arith = outer`, and we must NOT subst —
+    --     eliminating `inv` from the lctx breaks downstream `suffices`/
+    --     `refine` blocks that reference it by name. So `expr = fvar`
+    --     keeps the strict gate (only literals/constructors on LHS).
+    --
+    -- Both directions still exclude bare unapplied user consts: `x = my_fn`
+    -- would inline `my_fn` everywhere `x` appeared and confuse downstream
+    -- `grind`. `e.isApp` allows `f a b` but not `f` alone.
     let env ← getEnv
-    let isSimple (e : Expr) : Bool := e.isFVar || e.isLit || isCtorApp env e
-    if (lhs.isFVar && isSimple rhs) || (rhs.isFVar && isSimple lhs) then
+    let isOfNatApp (e : Expr) : Bool :=
+      match e.getAppFn with
+      | .const ``OfNat.ofNat _ => true
+      | _ => false
+    let isNumLit (e : Expr) : Bool :=
+      isOfNatApp e ||
+        (match e.getAppFn with
+         | .const ``Neg.neg _ =>
+           let args := e.getAppArgs
+           args.size ≥ 3 && isOfNatApp args[2]!
+         | _ => false)
+    let isSimpleStrict (e : Expr) : Bool :=
+      e.isFVar || e.isLit || isNumLit e || isCtorApp env e
+    let isSimpleLoose (e : Expr) : Bool :=
+      isSimpleStrict e || e.isApp
+    if (lhs.isFVar && isSimpleLoose rhs) || (rhs.isFVar && isSimpleStrict lhs) then
       if ← tryTacticStep (evalTactic (← `(tactic| subst $hi))) then return true
   | _ => pure ()
   return false
@@ -158,8 +263,10 @@ private def isNonRecursiveDef (env : Environment) (n : Name) : Bool :=
   | _ => false
 
 -- Admit a hypothesis only when every `toUnfold` const in it is non-recursive
--- AND applied to a ctor-headed arg (so iota fires after the unfold).
--- Heuristic: ctor-headed check is positional-agnostic.
+-- AND every param position whose value would flow into a (possibly
+-- transitive) matcher scrutinee is ctor-headed at the call site. Without
+-- the transitive check, simp can cascade through a wrapper def into a
+-- matcher-bearing helper and leave a stuck `match v, _ with ...` residue.
 private partial def safeForSimp
     (env : Environment) (toUnfold : PHashSet Name) (e : Expr) : Bool :=
   match e with
@@ -170,7 +277,10 @@ private partial def safeForSimp
       | .const n _ =>
         if pureBoolWhitelist.contains n then true
         else if !toUnfold.contains n then true
-        else isNonRecursiveDef env n && args.any (isCtorApp env)
+        else
+          isNonRecursiveDef env n &&
+            (paramScrutPositions env toUnfold n).toList.all fun i =>
+              i < args.size && isCtorApp env args[i]!
       | _ => true
     okHead && args.all (safeForSimp env toUnfold)
   | .forallE _ ty body _ =>
@@ -189,12 +299,37 @@ private partial def safeForSimp
     else isNonRecursiveDef env n
   | _ => true
 
+-- Resolve an `ite` inside a hypothesis when the condition is discharged by
+-- the current lctx. Finds the first `ite c _ _ _ _` subterm and tries
+-- `simp only [if_pos (by …)]`/`[if_neg (by …)]` against `h`, where the
+-- inner tactic is `assumption | omega | decide`. `simp only` fails cheaply
+-- on "no progress" when the probe can't close, so we don't pre-filter.
+private def tryIteResolve (d : LocalDecl) (ty : Expr) : TacticM Bool := do
+  let some iteExpr := ty.find? (·.isAppOfArity ``ite 5) | return false
+  let cond := iteExpr.getAppArgs[1]!
+  let hi := mkIdent d.userName
+  let condStx ← Term.exprToSyntax cond
+  if ← tryTacticStep (evalTactic (← `(tactic|
+      simp only [if_pos (show $condStx by first | assumption | omega | decide)] at $hi:ident))) then
+    return true
+  if ← tryTacticStep (evalTactic (← `(tactic|
+      simp only [if_neg (show ¬ $condStx by first | assumption | omega | decide)] at $hi:ident))) then
+    return true
+  return false
+
 private def trySimp (d : LocalDecl) (ty : Expr) : TacticM Bool := do
   let toUnfold := (← Lean.Meta.getSimpTheorems).toUnfold
-  if !safeForSimp (← getEnv) toUnfold ty then return false
   let hi := mkIdent d.userName
   let loc ← `(Lean.Parser.Tactic.locationHyp| $hi:ident)
-  tryTacticStep (evalTactic (← `(tactic| simp at $loc)))
+  if safeForSimp (← getEnv) toUnfold ty then
+    tryTacticStep (evalTactic (← `(tactic| simp at $loc)))
+  else
+    -- Narrow logical-only fallback when `safeForSimp` gates off the full
+    -- `simp at`. No def unfolds, so no stuck-matcher residue is possible.
+    tryTacticStep (evalTactic (← `(tactic|
+      simp only [true_and, false_and, and_true, and_false,
+                 true_or, false_or, or_true, or_false,
+                 not_true, not_false, reduceCtorEq] at $loc)))
 
 -- Bail early if the lctx already contradicts itself: `False` hypothesis,
 -- `P` + `¬P`, or disjoint-constructor equalities. Stops the rest of
@@ -219,13 +354,70 @@ private def tryClearTrivial (d : LocalDecl) (ty : Expr) : TacticM Bool := do
     if ← tryTacticStep (evalTactic (← `(tactic| clear $hi))) then return true
   return false
 
+-- Recognize a hypothesis type that looks like linear arithmetic over `Int`/
+-- `Nat`. Head must be `LE.le`/`LT.lt`/`GE.ge`/`GT.gt`/`Eq`, with the operand
+-- type a numeric type that `grind`/`omega` can reason about. Gates
+-- `tryClearRedundant` so we only run the (expensive) probe on hypotheses
+-- where redundancy via arithmetic is actually plausible — running it on every
+-- hyp blows the outer simp_hyps heartbeat budget on large rbtree lctxs.
+private def isArithProp (ty : Expr) : Bool :=
+  let isNumericTy (t : Expr) : Bool := match t with
+    | .const ``Int _ | .const ``Nat _ => true
+    | _ => false
+  match_expr ty with
+  | LE.le t _ _ _ => isNumericTy t
+  | LT.lt t _ _ _ => isNumericTy t
+  | GE.ge t _ _ _ => isNumericTy t
+  | GT.gt t _ _ _ => isNumericTy t
+  | Eq t _ _ => isNumericTy t
+  | _ => false
+
+-- Clear a hypothesis if it follows from the rest of the local context. Probe:
+-- build a fresh goal of type `ty` in a copy of the current lctx with `d`
+-- removed, then try `grind`. If grind closes it, `d` is redundant and we drop
+-- it from the main goal. Catches cases like `0 ≤ h - 1 + (h - 1) + 1` that
+-- follow from a sibling `h > 0` but aren't tautologies in isolation (so
+-- `tryClearTrivial`'s empty-context probe can't see them).
+--
+-- Gated to arithmetic-shaped types: the probe is too expensive to run on every
+-- hypothesis (rbtree-shaped lctxs blow the outer heartbeat budget), and
+-- arithmetic is where this kind of derivable-from-siblings redundancy
+-- actually shows up in practice.
+private def tryClearRedundant (d : LocalDecl) (ty : Expr) : TacticM Bool := do
+  if !isArithProp ty then return false
+  let hi := mkIdent d.userName
+  let provable ← withMainContext do
+    let gs ← getGoals
+    let probeId? ← try
+      let probe ← mkFreshExprMVar (some ty)
+      pure (some (← probe.mvarId!.clear d.fvarId))
+    catch e => rethrowIfFatal e; pure none
+    match probeId? with
+    | none => pure false
+    | some probeId =>
+      setGoals [probeId]
+      let ok ← try
+        withCurrHeartbeats <|
+          evalTactic (← `(tactic| set_option maxHeartbeats 4000 in grind))
+        pure true
+      catch e =>
+        if e.isInterrupt || e.isMaxRecDepth then throw e
+        pure false
+      let solved := ok && (← getGoals).isEmpty
+      setGoals gs
+      pure solved
+  if provable then
+    return ← tryTacticStep (evalTactic (← `(tactic| clear $hi)))
+  return false
+
 /-! ## Public entry points -/
 
 def simpHypsOnce : TacticM Bool := withMainContext do
   if ← tryCloseByContradiction then return true
   let lctx ← getLCtx
   let phases : Array (LocalDecl → Expr → TacticM Bool) :=
-    #[tryDestruct, trySpecialize lctx, tryNormalize, trySimp, tryClearTrivial]
+    #[tryDestruct, trySpecialize lctx, tryNormalize, trySimp, tryIteResolve,
+      tryClearTrivial, tryClearRedundant]
   for d in lctx do
     if d.isImplementationDetail then continue
     let ty ← instantiateMVars d.type
